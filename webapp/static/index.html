@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-GPU Video Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+        }
+
+        .gpu-status {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .gpu-card {
+            flex: 1;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            text-align: center;
+            border: 2px solid #e0e0e0;
+        }
+
+        .gpu-card.free {
+            border-color: #4caf50;
+            background: #e8f5e9;
+        }
+
+        .gpu-card.busy {
+            border-color: #ff9800;
+            background: #fff3e0;
+        }
+
+        .gpu-card h3 {
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+
+        .upload-zone {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .upload-zone:hover {
+            background: #f0f4ff;
+            border-color: #764ba2;
+        }
+
+        .upload-zone.dragover {
+            background: #e8f0fe;
+            border-color: #4285f4;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .text-input {
+            width: 100%;
+            min-height: 150px;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 1em;
+            margin-bottom: 20px;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        .text-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .tasks-list {
+            margin-top: 40px;
+        }
+
+        .task-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .task-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .status-queued {
+            background: #ffeaa7;
+            color: #d63031;
+        }
+
+        .status-running {
+            background: #74b9ff;
+            color: #0984e3;
+        }
+
+        .status-completed {
+            background: #55efc4;
+            color: #00b894;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, ##764ba2);
+            transition: width 0.3s;
+        }
+
+        .download-btn {
+            padding: 10px 20px;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .file-name {
+            margin-top: 10px;
+            color: #667eea;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎬 Multi-GPU Video Generator</h1>
+        <p class="subtitle">AI-Powered Voice Cloning & Talking Head Videos</p>
+
+        <div class="gpu-status" id="gpuStatus">
+            <!-- GPU cards will be inserted here dynamically -->
+        </div>
+
+        <div class="upload-zone" id="uploadZone">
+            <h2>📹 Upload Video</h2>
+            <p>Drag and drop or click to select</p>
+            <p class="file-name" id="fileName"></p>
+            <input type="file" id="videoFile" accept="video/*">
+        </div>
+
+        <textarea class="text-input" id="textInput"
+            placeholder="Enter the text you want the video to say (voice will be cloned from uploaded video)..."></textarea>
+
+        <button class="submit-btn" id="submitBtn" onclick="submitVideo()">
+            🚀 Generate Video
+        </button>
+
+        <div class="tasks-list" id="tasksList">
+            <h2>📋 Active Tasks</h2>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000';
+        let activeTasks = [];
+
+        // Upload zone handlers
+        const uploadZone = document.getElementById('uploadZone');
+        const videoFile = document.getElementById('videoFile');
+        const fileName = document.getElementById('fileName');
+
+        uploadZone.onclick = () => videoFile.click();
+
+        videoFile.onchange = (e) => {
+            if (e.target.files.length > 0) {
+                fileName.textContent = `✅ ${e.target.files[0].name}`;
+            }
+        };
+
+        uploadZone.ondragover = (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        };
+
+        uploadZone.ondragleave = () => {
+            uploadZone.classList.remove('dragover');
+        };
+
+        uploadZone.ondrop = (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                videoFile.files = e.dataTransfer.files;
+                fileName.textContent = `✅ ${e.dataTransfer.files[0].name}`;
+            }
+        };
+
+        // Submit video
+        async function submitVideo() {
+            const file = videoFile.files[0];
+            const text = document.getElementById('textInput').value;
+
+            if (!file) {
+                alert('Please select a video file');
+                return;
+            }
+
+            if (!text) {
+                alert('Please enter text');
+                return;
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Processing...';
+
+            const formData = new FormData();
+            formData.append('video', file);
+            formData.append('text', text);
+
+            try {
+                const response = await fetch(`${API_URL}/api/generate`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`✅ Task submitted! ID: ${result.task_id}`);
+                    activeTasks.push(result.task_id);
+                    videoFile.value = '';
+                    fileName.textContent = '';
+                    document.getElementById('textInput').value = '';
+                } else {
+                    alert(`❌ Error: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Generate Video';
+            }
+        }
+
+        // Update GPU status
+        async function updateGPUStatus() {
+            try {
+                const response = await fetch(`${API_URL}/api/queue`);
+                const status = await response.json();
+
+                // Build complete GPU status HTML
+                let gpuHTML = '';
+
+                ['gpu0', 'gpu1', 'gpu2'].forEach((gpu, idx) => {
+                    const isBusy = status[gpu] === 'busy';
+                    gpuHTML += `
+                        <div class="gpu-card ${isBusy ? 'busy' : 'free'}">
+                            <h3>GPU ${idx}</h3>
+                            <p>${isBusy ? '🔴 Busy' : '🟢 Free'}</p>
+                        </div>
+                    `;
+                });
+
+                // Add queue card
+                gpuHTML += `
+                    <div class="gpu-card" style="flex: 0.5;">
+                        <h3>Queue</h3>
+                        <p>${status.queue_size || 0}</p>
+                    </div>
+                `;
+
+                // Replace entire GPU status
+                document.getElementById('gpuStatus').innerHTML = gpuHTML;
+
+            } catch (error) {
+                console.error('GPU status error:', error);
+            }
+        }
+
+        // Update task statuses
+        async function updateTasks() {
+            if (activeTasks.length === 0) return;
+
+            const tasksList = document.getElementById('tasksList');
+            let html = '<h2>📋 Active Tasks</h2>';
+
+            for (const taskId of activeTasks) {
+                try {
+                    const response = await fetch(`${API_URL}/api/status/${taskId}`);
+                    const data = await response.json();
+                    const status = data.task_status;
+
+                    let statusClass = 'status-queued';
+                    let statusText = 'Queued';
+                    let progress = 0;
+                    let downloadBtn = '';
+
+                    if (status.status === 'running') {
+                        statusClass = 'status-running';
+                        statusText = `Running on GPU ${status.gpu_id}`;
+                        progress = Math.min(95, (status.elapsed_seconds / 300) * 100);
+                    } else if (status.status === 'completed') {
+                        statusClass = 'status-completed';
+                        statusText = 'Completed';
+                        progress = 100;
+                        downloadBtn = `<a href="${API_URL}/api/download/${taskId}" class="download-btn">⬇️ Download</a>`;
+                    } else if (status.status === 'queued') {
+                        statusText = `Queued (Position: ${status.queue_position})`;
+                    }
+
+                    html += `
+                        <div class="task-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong>Task ID:</strong> ${taskId}
+                                    <br>
+                                    <span class="task-status ${statusClass}">${statusText}</span>
+                                </div>
+                                ${downloadBtn}
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${progress}%"></div>
+                            </div>
+                        </div>
+                    `;
+                } catch (error) {
+                    console.error(`Task ${taskId} error:`, error);
+                }
+            }
+
+            tasksList.innerHTML = html;
+        }
+
+        // Auto-refresh
+        setInterval(updateGPUStatus, 2000);
+        setInterval(updateTasks, 3000);
+        updateGPUStatus();
+        updateTasks();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Video Random Merge Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .mode-badge {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .mode-badge span {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+        }
+
+        .info-box {
+            background: #e8f4f8;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+        .upload-section {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .upload-section:hover {
+            background: #f0f4ff;
+        }
+
+        .upload-section h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-list {
+            margin-top: 15px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            background: #f8f9fa;
+            padding: 8px 12px;
+            margin: 5px 0;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-item button {
+            background: #ff4444;
+            color: white;
+            border: none;
+            padding: 3px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .text-input {
+            width: 100%;
+            min-height: 120px;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 1em;
+            margin-bottom: 20px;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .gpu-status {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .gpu-card {
+            flex: 1;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            text-align: center;
+            border: 2px solid #e0e0e0;
+        }
+
+        .gpu-card.free {
+            border-color: #4caf50;
+            background: #e8f5e9;
+        }
+
+        .gpu-card.busy {
+            border-color: #ff9800;
+            background: #fff3e0;
+        }
+
+        .tasks-list {
+            margin-top: 40px;
+        }
+
+        .task-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .task-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .status-splitting {
+            background: #ffeaa7;
+            color: #d63031;
+        }
+
+        .status-processing {
+            background: #74b9ff;
+            color: #0984e3;
+        }
+
+        .status-merging {
+            background: #a29bfe;
+            color: #6c5ce7;
+        }
+
+        .status-completed {
+            background: #55efc4;
+            color: #00b894;
+        }
+
+        .download-btn {
+            padding: 10px 20px;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎲 Multi-Video Random Merge</h1>
+        <p class="subtitle">Natural variation with random video combinations</p>
+
+        <div class="mode-badge">
+            <span>🎬 RANDOM MERGE MODE: Multiple Videos → Random Mix → 3 GPUs</span>
+        </div>
+
+        <div class="info-box">
+            <strong>📊 How it works:</strong> Upload multiple face videos. For each chunk, videos are randomly
+            selected and merged to match audio duration. No repetitive patterns - each chunk gets a unique mix!
+        </div>
+
+        <div class="gpu-status" id="gpuStatus"></div>
+
+        <!-- Multiple Video Upload -->
+        <div class="upload-section" id="videoUploadZone">
+            <h3>📹 Upload Multiple Videos</h3>
+            <p>Click or drag and drop multiple video files</p>
+            <input type="file" id="videoFiles" accept="video/*" multiple>
+            <div class="file-list" id="videoFileList"></div>
+        </div>
+
+        <!-- Reference Audio Upload -->
+        <div class="upload-section" id="audioUploadZone">
+            <h3>🎤 Upload Reference Audio</h3>
+            <p>For voice cloning</p>
+            <input type="file" id="referenceAudio" accept="audio/*,.wav,.mp3">
+            <div class="file-list" id="audioFileName"></div>
+        </div>
+
+        <!-- Text Input -->
+        <textarea class="text-input" id="textInput"
+            placeholder="Enter the text you want to say (voice will be cloned from reference audio)..."></textarea>
+
+        <button class="submit-btn" id="submitBtn" onclick="submitTask()">
+            🚀 Generate Video (Random Merge Mode)
+        </button>
+
+        <div class="tasks-list" id="tasksList">
+            <h2>📋 Active Tasks</h2>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5002';
+        let activeTasks = [];
+        let selectedVideoFiles = [];
+        let selectedAudioFile = null;
+
+        // Video upload handling
+        const videoUploadZone = document.getElementById('videoUploadZone');
+        const videoFilesInput = document.getElementById('videoFiles');
+        const videoFileList = document.getElementById('videoFileList');
+
+        videoUploadZone.onclick = () => videoFilesInput.click();
+
+        videoFilesInput.onchange = (e) => {
+            selectedVideoFiles = Array.from(e.target.files);
+            updateVideoFileList();
+        };
+
+        function updateVideoFileList() {
+            if (selectedVideoFiles.length === 0) {
+                videoFileList.innerHTML = '<p style="color: #999;">No videos selected</p>';
+                return;
+            }
+
+            videoFileList.innerHTML = '';
+            selectedVideoFiles.forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'file-item';
+                item.innerHTML = `
+                    <span>✅ ${file.name}</span>
+                    <button onclick="removeVideo(${index})">Remove</button>
+                `;
+                videoFileList.appendChild(item);
+            });
+        }
+
+        function removeVideo(index) {
+            selectedVideoFiles.splice(index, 1);
+            updateVideoFileList();
+        }
+
+        // Audio upload handling
+        const audioUploadZone = document.getElementById('audioUploadZone');
+        const audioInput = document.getElementById('referenceAudio');
+        const audioFileName = document.getElementById('audioFileName');
+
+        audioUploadZone.onclick = () => audioInput.click();
+
+        audioInput.onchange = (e) => {
+            if (e.target.files.length > 0) {
+                selectedAudioFile = e.target.files[0];
+                audioFileName.innerHTML = `<div class="file-item"><span>✅ ${selectedAudioFile.name}</span></div>`;
+            }
+        };
+
+        // Submit task
+        async function submitTask() {
+            const text = document.getElementById('textInput').value;
+
+            if (selectedVideoFiles.length === 0) {
+                alert('Please select at least one video file');
+                return;
+            }
+
+            if (!selectedAudioFile) {
+                alert('Please select reference audio');
+                return;
+            }
+
+            if (!text) {
+                alert('Please enter text');
+                return;
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Processing...';
+
+            const formData = new FormData();
+
+            // Add all videos
+            selectedVideoFiles.forEach(file => {
+                formData.append('videos', file);
+            });
+
+            // Add reference audio
+            formData.append('reference_audio', selectedAudioFile);
+
+            // Add text
+            formData.append('text', text);
+
+            try {
+                const response = await fetch(`${API_URL}/api/generate`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`✅ Task submitted! ID: ${result.task_id}\n${result.input_videos} videos will be randomly merged.`);
+                    activeTasks.push(result.task_id);
+
+                    // Clear inputs
+                    selectedVideoFiles = [];
+                    selectedAudioFile = null;
+                    videoFilesInput.value = '';
+                    audioInput.value = '';
+                    updateVideoFileList();
+                    audioFileName.innerHTML = '';
+                    document.getElementById('textInput').value = '';
+                } else {
+                    alert(`❌ Error: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Generate Video (Random Merge Mode)';
+            }
+        }
+
+        // Update GPU status
+        async function updateGPUStatus() {
+            try {
+                const response = await fetch(`${API_URL}/api/gpu-status`);
+                const status = await response.json();
+
+                let gpuHTML = '';
+                ['gpu0', 'gpu1', 'gpu2'].forEach((gpu, idx) => {
+                    const isBusy = status[gpu] === 'busy';
+                    gpuHTML += `
+                        <div class="gpu-card ${isBusy ? 'busy' : 'free'}">
+                            <h3>GPU ${idx}</h3>
+                            <p>${isBusy ? '🔴 Processing' : '🟢 Free'}</p>
+                            <small>Chunk ${idx + 1}</small>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('gpuStatus').innerHTML = gpuHTML;
+            } catch (error) {
+                console.error('GPU status error:', error);
+            }
+        }
+
+        // Update tasks
+        async function updateTasks() {
+            if (activeTasks.length === 0) return;
+
+            const tasksList = document.getElementById('tasksList');
+            let html = '<h2>📋 Active Tasks</h2>';
+
+            for (const taskId of activeTasks) {
+                try {
+                    const response = await fetch(`${API_URL}/api/status/${taskId}`);
+                    const data = await response.json();
+                    const status = data.task_status;
+
+                    let statusClass = 'status-splitting';
+                    let statusText = status.status || 'unknown';
+                    let downloadBtn = '';
+
+                    if (status.status === 'splitting') {
+                        statusClass = 'status-splitting';
+                        statusText = 'Splitting & Merging Videos';
+                    } else if (status.status === 'processing') {
+                        statusClass = 'status-processing';
+                        statusText = 'Processing Chunks (3 GPUs)';
+                    } else if (status.status === 'merging') {
+                        statusClass = 'status-merging';
+                        statusText = 'Merging Final Video';
+                    } else if (status.status === 'completed') {
+                        statusClass = 'status-completed';
+                        statusText = 'Completed';
+                        downloadBtn = `<a href="${API_URL}/api/download/${taskId}" class="download-btn">⬇️ Download</a>`;
+                    }
+
+                    html += `
+                        <div class="task-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong>Task ID:</strong> ${taskId}
+                                    <br>
+                                    <span class="task-status ${statusClass}">${statusText}</span>
+                                </div>
+                                ${downloadBtn}
+                            </div>
+                            ${status.elapsed_seconds ? `<small>⏱️ ${status.elapsed_seconds}s elapsed</small>` : ''}
+                        </div>
+                    `;
+                } catch (error) {
+                    console.error(`Task ${taskId} error:`, error);
+                }
+            }
+
+            tasksList.innerHTML = html;
+        }
+
+        // Auto-refresh
+        setInterval(updateGPUStatus, 2000);
+        setInterval(updateTasks, 3000);
+        updateGPUStatus();
+        updateTasks();
+        updateVideoFileList();
+    </script>
+</body>
+
+</html>

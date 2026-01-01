@@ -1,0 +1,81 @@
+version: '3.8'
+
+networks:
+  heygem_network:
+    driver: bridge
+
+services:
+  heygem-gpu0:
+    image: guiji2025/heygem.ai
+    container_name: heygem-gpu0
+    restart: always
+    runtime: nvidia
+    privileged: true
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+    shm_size: '8g'
+    ports:
+      - '8390:8383'
+    volumes:
+      - ~/heygem_data/gpu0:/code/data
+    command: python /code/app_local.py
+    networks:
+      - heygem_network
+
+  heygem-gpu1:
+    image: guiji2025/heygem.ai
+    container_name: heygem-gpu1
+    restart: always
+    runtime: nvidia
+    privileged: true
+    environment:
+      - CUDA_VISIBLE_DEVICES=1
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+    shm_size: '8g'
+    ports:
+      - '8391:8383'
+    volumes:
+      - ~/heygem_data/gpu1:/code/data
+    command: python /code/app_local.py
+    networks:
+      - heygem_network
+
+  heygem-gpu2:
+    image: guiji2025/heygem.ai
+    container_name: heygem-gpu2
+    restart: always
+    runtime: nvidia
+    privileged: true
+    environment:
+      - CUDA_VISIBLE_DEVICES=2
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['2']
+              capabilities: [gpu]
+    shm_size: '8g'
+    ports:
+      - '8392:8383'
+    volumes:
+      - ~/heygem_data/gpu2:/code/data
+    command: python /code/app_local.py
+    networks:
+      - heygem_network

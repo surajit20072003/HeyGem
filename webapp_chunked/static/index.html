@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chunked Multi-GPU Video Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: #f5576c;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .mode-badge {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .mode-badge span {
+            display: inline-block;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+
+        .gpu-status {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .gpu-card {
+            flex: 1;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            text-align: center;
+            border: 2px solid #e0e0e0;
+        }
+
+        .gpu-card.free {
+            border-color: #4caf50;
+            background: #e8f5e9;
+        }
+
+        .gpu-card.busy {
+            border-color: #ff9800;
+            background: #fff3e0;
+        }
+
+        .gpu-card h3 {
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+
+        .upload-zone {
+            border: 3px dashed #f5576c;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .upload-zone:hover {
+            background: #fff0f0;
+            border-color: #f093fb;
+        }
+
+        .upload-zone.dragover {
+            background: #ffe8ee;
+            border-color: #f5576c;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .text-input {
+            width: 100%;
+            min-height: 150px;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 1em;
+            margin-bottom: 20px;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        .text-input:focus {
+            outline: none;
+            border-color: #f5576c;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .tasks-list {
+            margin-top: 40px;
+        }
+
+        .task-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #f5576c;
+        }
+
+        .task-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .status-splitting {
+            background: #ffeaa7;
+            color: #d63031;
+        }
+
+        .status-processing {
+            background: #74b9ff;
+            color: #0984e3;
+        }
+
+        .status-merging {
+            background: #a29bfe;
+            color: #6c5ce7;
+        }
+
+        .status-completed {
+            background: #55efc4;
+            color: #00b894;
+        }
+
+        .status-failed {
+            background: #ff7675;
+            color: #d63031;
+        }
+
+        .chunk-progress {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+
+        .chunk-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+
+        .chunk-label {
+            width: 120px;
+            font-weight: bold;
+            color: #666;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #f093fb, #f5576c);
+            transition: width 0.3s;
+        }
+
+        .download-btn {
+            padding: 10px 20px;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .file-name {
+            margin-top: 10px;
+            color: #f5576c;
+            font-weight: bold;
+        }
+
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+        .info-box strong {
+            color: #1976d2;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>⚡ Chunked Multi-GPU Generator</h1>
+        <p class="subtitle">3 GPUs Parallel Processing</p>
+
+        <div class="mode-badge">
+            <span>🚀 CHUNKED MODE: Audio Split → 3 GPUs Parallel → Merge</span>
+        </div>
+
+        <div class="info-box">
+            <strong>📊 How it works:</strong> Your audio is split into 3 equal chunks. Each chunk is processed 
+            simultaneously on a different GPU, then merged into the final video. This is faster for longer videos!
+        </div>
+
+        <div class="gpu-status" id="gpuStatus">
+            <!-- GPU cards will be inserted here dynamically -->
+        </div>
+
+        <div class="upload-zone" id="uploadZone">
+            <h2>📹 Upload Video</h2>
+            <p>Drag and drop or click to select</p>
+            <p class="file-name" id="fileName"></p>
+            <input type="file" id="videoFile" accept="video/*">
+        </div>
+
+        <textarea class="text-input" id="textInput"
+            placeholder="Enter the text you want the video to say (voice will be cloned from uploaded video)..."></textarea>
+
+        <button class="submit-btn" id="submitBtn" onclick="submitVideo()">
+            🚀 Generate Video (Chunked Mode)
+        </button>
+
+        <div class="tasks-list" id="tasksList">
+            <h2>📋 Active Tasks</h2>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5001';
+        let activeTasks = [];
+
+        // Upload zone handlers
+        const uploadZone = document.getElementById('uploadZone');
+        const videoFile = document.getElementById('videoFile');
+        const fileName = document.getElementById('fileName');
+
+        uploadZone.onclick = () => videoFile.click();
+
+        videoFile.onchange = (e) => {
+            if (e.target.files.length > 0) {
+                fileName.textContent = `✅ ${e.target.files[0].name}`;
+            }
+        };
+
+        uploadZone.ondragover = (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        };
+
+        uploadZone.ondragleave = () => {
+            uploadZone.classList.remove('dragover');
+        };
+
+        uploadZone.ondrop = (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                videoFile.files = e.dataTransfer.files;
+                fileName.textContent = `✅ ${e.dataTransfer.files[0].name}`;
+            }
+        };
+
+        // Submit video
+        async function submitVideo() {
+            const file = videoFile.files[0];
+            const text = document.getElementById('textInput').value;
+
+            if (!file) {
+                alert('Please select a video file');
+                return;
+            }
+
+            if (!text) {
+                alert('Please enter text');
+                return;
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Processing...';
+
+            const formData = new FormData();
+            formData.append('video', file);
+            formData.append('text', text);
+
+            try {
+                const response = await fetch(`${API_URL}/api/generate`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`✅ Chunked task submitted! ID: ${result.task_id}`);
+                    activeTasks.push(result.task_id);
+                    videoFile.value = '';
+                    fileName.textContent = '';
+                    document.getElementById('textInput').value = '';
+                } else {
+                    alert(`❌ Error: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Generate Video (Chunked Mode)';
+            }
+        }
+
+        // Update GPU status
+        async function updateGPUStatus() {
+            try {
+                const response = await fetch(`${API_URL}/api/gpu-status`);
+                const status = await response.json();
+
+                let gpuHTML = '';
+
+                ['gpu0', 'gpu1', 'gpu2'].forEach((gpu, idx) => {
+                    const isBusy = status[gpu] === 'busy';
+                    gpuHTML += `
+                        <div class="gpu-card ${isBusy ? 'busy' : 'free'}">
+                            <h3>GPU ${idx}</h3>
+                            <p>${isBusy ? '🔴 Processing' : '🟢 Free'}</p>
+                            <small>Chunk ${idx + 1}</small>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('gpuStatus').innerHTML = gpuHTML;
+
+            } catch (error) {
+                console.error('GPU status error:', error);
+            }
+        }
+
+        // Update task statuses
+        async function updateTasks() {
+            if (activeTasks.length === 0) return;
+
+            const tasksList = document.getElementById('tasksList');
+            let html = '<h2>📋 Active Tasks</h2>';
+
+            for (const taskId of activeTasks) {
+                try {
+                    const response = await fetch(`${API_URL}/api/status/${taskId}`);
+                    const data = await response.json();
+                    const status = data.task_status;
+
+                    let statusClass = 'status-splitting';
+                    let statusText = status.status || 'unknown';
+                    let downloadBtn = '';
+                    let chunkHTML = '';
+
+                    if (status.status === 'splitting') {
+                        statusClass = 'status-splitting';
+                        statusText = 'Splitting Audio';
+                    } else if (status.status === 'processing') {
+                        statusClass = 'status-processing';
+                        statusText = 'Processing Chunks (3 GPUs)';
+                        
+                        // Show chunk progress
+                        chunkHTML = '<div class="chunk-progress">';
+                        for (let i = 0; i < 3; i++) {
+                            chunkHTML += `
+                                <div class="chunk-item">
+                                    <span class="chunk-label">GPU ${i} (Chunk ${i+1})</span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 75%"></div>
+                                    </div>
+                                    <span>🔄</span>
+                                </div>
+                            `;
+                        }
+                        chunkHTML += '</div>';
+                    } else if (status.status === 'merging') {
+                        statusClass = 'status-merging';
+                        statusText = 'Merging Video Chunks';
+                    } else if (status.status === 'completed') {
+                        statusClass = 'status-completed';
+                        statusText = 'Completed';
+                        downloadBtn = `<a href="${API_URL}/api/download/${taskId}" class="download-btn">⬇️ Download</a>`;
+                    } else if (status.status === 'failed') {
+                        statusClass = 'status-failed';
+                        statusText = 'Failed';
+                    }
+
+                    html += `
+                        <div class="task-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong>Task ID:</strong> ${taskId}
+                                    <br>
+                                    <span class="task-status ${statusClass}">${statusText}</span>
+                                </div>
+                                ${downloadBtn}
+                            </div>
+                            ${chunkHTML}
+                            ${status.elapsed_seconds ? `<small>⏱️ ${status.elapsed_seconds}s elapsed</small>` : ''}
+                        </div>
+                    `;
+                } catch (error) {
+                    console.error(`Task ${taskId} error:`, error);
+                }
+            }
+
+            tasksList.innerHTML = html;
+        }
+
+        // Auto-refresh
+        setInterval(updateGPUStatus, 2000);
+        setInterval(updateTasks, 3000);
+        updateGPUStatus();
+        updateTasks();
+    </script>
+</body>
+
+</html>

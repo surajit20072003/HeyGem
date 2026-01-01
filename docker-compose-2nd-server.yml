@@ -1,0 +1,101 @@
+version: '3.8'
+
+networks:
+  heygem_network:
+    driver: bridge
+
+services:
+  # GPU 0 - Video Generation
+  heygem-gpu0:
+    image: guiji2025/heygem.ai
+    container_name: heygem-gpu0
+    restart: always
+    runtime: nvidia
+    privileged: true
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+    shm_size: '8g'
+    ports:
+      - '8390:8383'
+    volumes:
+      - ~/heygem_data/gpu0:/code/data
+    command: python /code/app_local.py
+    networks:
+      - heygem_network
+
+  # GPU 1 - Video Generation
+  heygem-gpu1:
+    image: guiji2025/heygem.ai
+    container_name: heygem-gpu1
+    restart: always
+    runtime: nvidia
+    privileged: true
+    environment:
+      - CUDA_VISIBLE_DEVICES=1
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+    shm_size: '8g'
+    ports:
+      - '8391:8383'
+    volumes:
+      - ~/heygem_data/gpu1:/code/data
+    command: python /code/app_local.py
+    networks:
+      - heygem_network
+
+  # GPU 2 - Video Generation
+  heygem-gpu2:
+    image: guiji2025/heygem.ai
+    container_name: heygem-gpu2
+    restart: always
+    runtime: nvidia
+    privileged: true
+    environment:
+      - CUDA_VISIBLE_DEVICES=2
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['2']
+              capabilities: [gpu]
+    shm_size: '8g'
+    ports:
+      - '8392:8383'
+    volumes:
+      - ~/heygem_data/gpu2:/code/data
+    command: python /code/app_local.py
+    networks:
+      - heygem_network
+
+  # TTS Service (Voice Cloning)
+  heygem-tts:
+    image: guiji2025/fish-speech-ziming
+    container_name: heygem-tts-new
+    restart: always
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - NVIDIA_DRIVER_CAPABILITIES=compute,graphics,utility,video,display
+    ports:
+      - '18181:8080'
+    volumes:
+      - ~/heygem_data/tts:/code/data
+    command: /bin/bash -c "/opt/conda/envs/python310/bin/python3 tools/api_server.py --listen 0.0.0.0:8080"
+    networks:
+      - heygem_network
