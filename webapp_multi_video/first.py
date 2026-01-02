@@ -353,14 +353,28 @@ class MultiVideoScheduler:
             # Step 1: Split audio
             audio_chunks = self.split_audio(audio_path, num_chunks=3)
             
-            # Step 2: Pick ONE random video per GPU (no merging!)
-            self.log(f"🎲 Selecting random videos for each GPU", task_id)
+            # Step 2: Create random merged videos for each chunk
+            self.log(f"🎲 Creating random video merges for each chunk", task_id)
             
-            selected_videos = []
-            for i in range(3):
-                random_video = random.choice(input_videos)
-                selected_videos.append(random_video)
-                self.log(f"   GPU {i}: {os.path.basename(random_video)}", task_id)
+            merged_videos = []
+            for i, audio_chunk in enumerate(audio_chunks):
+                chunk_duration = self.get_audio_duration(audio_chunk)
+                merged_video_path = f"/nvme0n1-disk/HeyGem/webapp_multi_video/temp/merged_chunk{i+1}_{task_id}.mp4"
+                
+                merged_video = self.merge_videos_randomly(
+                    input_videos,
+                    chunk_duration,
+                    merged_video_path
+                )
+                
+                if not merged_video:
+                    self.log(f"❌ Failed to merge videos for chunk {i+1}", task_id)
+                    with self.lock:
+                        self.active_tasks[task_id]["status"] = "failed"
+                        self.active_tasks[task_id]["error"] = f"Video merge failed for chunk {i+1}"
+                    return
+                
+                merged_videos.append(merged_video)
             
             # Step 3: Submit to GPUs
             self.log(f"🎬 Submitting 3 chunks to GPUs", task_id)
@@ -368,11 +382,11 @@ class MultiVideoScheduler:
             chunk_tasks = []
             chunk_outputs = []
             
-            for i, (video, audio_chunk) in enumerate(zip(selected_videos, audio_chunks)):
+            for i, (merged_video, audio_chunk) in enumerate(zip(merged_videos, audio_chunks)):
                 gpu_id = i
                 chunk_code = f"{task_id}_chunk{i+1:02d}"
                 
-                success = self.submit_to_gpu(gpu_id, video, audio_chunk, chunk_code)
+                success = self.submit_to_gpu(gpu_id, merged_video, audio_chunk, chunk_code)
                 
                 if not success:
                     self.log(f"❌ Failed to submit chunk {i+1}", task_id)
