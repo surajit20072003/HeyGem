@@ -8,16 +8,20 @@ from flask_cors import CORS
 import os
 import subprocess
 import time
+import threading
 from werkzeug.utils import secure_filename
 from chunked_scheduler import scheduler
+from text_normalization import latex_to_speech
 
 app = Flask(__name__)
 CORS(app)
 
 # Configuration
-UPLOAD_FOLDER = '/nvme0n1-disk/HeyGem/webapp_chunked/uploads'
-OUTPUT_FOLDER = '/nvme0n1-disk/HeyGem/webapp_chunked/outputs'
-TEMP_FOLDER = '/nvme0n1-disk/HeyGem/webapp_chunked/temp'
+# Configuration
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+OUTPUT_FOLDER = os.path.join(BASE_DIR, 'outputs')
+TEMP_FOLDER = os.path.join(BASE_DIR, 'temp')
 TTS_API = 'http://localhost:18181'  # Fish-Speech container
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -36,11 +40,9 @@ def extract_audio_from_video(video_path: str) -> str:
     audio_output = os.path.join(TEMP_FOLDER, f"ref_audio_{int(time.time())}.wav")
     
     try:
-        subprocess.run([
-            'ffmpeg', '-i', video_path,
-            '-vn', '-acodec', 'pcm_s16le', '-ar', '44100',
-            audio_output, '-y'
-        ], check=True, capture_output=True)
+        # Extract audio using ffmpeg, limit to 15 seconds for better TTS stability
+        cmd = ['/usr/bin/ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', '-t', '15', audio_output]
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         
         return audio_output
     except Exception as e:
@@ -53,7 +55,13 @@ def generate_voice_cloning(text: str, reference_audio: str) -> str:
     import requests
     
     # Clean text
+    # Clean text
     text = ' '.join(text.split())
+    
+    # Normalize Math/LaTeX if present
+    print(f"   📐 Normalizing Text (Before): {text[:50]}...")
+    text = latex_to_speech(text)
+    print(f"   📐 Normalizing Text (After):  {text[:50]}...")
     
     if not text or len(text.strip()) == 0:
         print(f"   ❌ Empty text provided, using reference audio as fallback")
@@ -62,7 +70,7 @@ def generate_voice_cloning(text: str, reference_audio: str) -> str:
     print(f"   📝 TTS Request: '{text[:80]}...' ({len(text)} chars)")
     
     # Copy reference audio to TTS data directory
-    tts_ref_dir = os.path.expanduser("~/heygem_data/voice/data/reference")
+    tts_ref_dir = os.path.expanduser("~/heygem_data/tts/reference")
     os.makedirs(tts_ref_dir, exist_ok=True)
     
     ref_filename = os.path.basename(reference_audio)
@@ -81,7 +89,7 @@ def generate_voice_cloning(text: str, reference_audio: str) -> str:
         response = requests.post(
             f"{TTS_API}/v1/invoke",
             json=payload,
-            timeout=240
+            timeout=6000 # Increased timeout
         )
         
         print(f"   Status: {response.status_code}, Size: {len(response.content)} bytes")
@@ -127,75 +135,114 @@ def api_info():
     })
 
 
+def process_task_background(task_id, text, video_path):
+    """Background task for audio extraction, TTS, and scheduling"""
+    
+    start_time = time.time()
+    try:
+        scheduler.set_preprocessing_status(task_id, "Extracting Audio...")
+        print(f"🔄 [Task {task_id}] Background processing started...")
+        
+        # Step 1: Extract audio from video
+        print(f"🎵 [Task {task_id}] Extracting audio using ffmpeg...")
+        reference_audio = extract_audio_from_video(video_path)
+        
+        if not reference_audio:
+            print(f"❌ [Task {task_id}] Audio extraction failed")
+            scheduler.set_preprocessing_status(task_id, "Error: Audio extraction failed")
+            return
+            
+        print(f"✅ [Task {task_id}] Audio extracted")
+
+        # Step 2: Generate voice-cloned audio
+        print(f"🎤 [Task {task_id}] Generating voice clone...")
+        scheduler.set_preprocessing_status(task_id, "Cloning Voice (This may take a few minutes)...")
+        cloned_audio = generate_voice_cloning(text, reference_audio)
+        
+        if not cloned_audio:
+            print(f"❌ [Task {task_id}] Voice cloning failed")
+            scheduler.set_preprocessing_status(task_id, "Error: Voice cloning failed")
+            return
+            
+        tts_duration = time.time() - start_time
+        print(f"✅ [Task {task_id}] Voice cloned (took {tts_duration:.2f}s)")
+        
+        # Step 3: Add to chunked scheduler
+        print(f"🎬 [Task {task_id}] Adding to Chunked Scheduler...")
+        scheduler.clear_preprocessing_status(task_id) # Remove from pre-processing
+        
+        scheduler.add_task(
+            video_path=video_path,
+            audio_path=cloned_audio,
+            text=text,
+            task_id=task_id,
+            tts_duration=tts_duration
+        )
+        
+    except Exception as e:
+        print(f"❌ [Task {task_id}] Background Process Error: {e}")
+        scheduler.set_preprocessing_status(task_id, f"Error: {str(e)}")
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate_video():
     """
-    Generate video with chunked parallel processing
-    Input: video file + text
-    Output: task_id for tracking
+    Generate video with chunked parallel processing (Async)
+    Input: video file (optional) + text
+    Output: task_id immediately
     """
-    # Validate input
-    if 'video' not in request.files:
-        return jsonify({"error": "No video file provided"}), 400
+    
+    # Generate task_id early
+    task_id = f"chunked_{int(time.time())}"
     
     if 'text' not in request.form:
         return jsonify({"error": "No text provided"}), 400
-    
-    video_file = request.files['video']
+        
     text = request.form['text']
     
-    if video_file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
+    # Handle video file (optional)
+    video_file = request.files.get('video')
     
-    if not allowed_video_file(video_file.filename):
-        return jsonify({"error": "Invalid video format"}), 400
-    
-    # Save uploaded video
-    filename = secure_filename(video_file.filename)
-    task_id = f"chunked_{int(time.time())}"
-    video_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
-    video_file.save(video_path)
-    
+    if video_file and video_file.filename != '':
+        # User uploaded video
+        if not allowed_video_file(video_file.filename):
+            return jsonify({"error": "Invalid video format"}), 400
+            
+        filename = secure_filename(video_file.filename)
+        video_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
+        video_file.save(video_path)
+    else:
+        # Use default video
+        print("ℹ️ No video uploaded, using default")
+        default_video_path = os.path.join(BASE_DIR, "default.mp4")
+        if not os.path.exists(default_video_path):
+             return jsonify({"error": "Default video not found on server"}), 500
+             
+        # Copy default video to uploads with task_id to avoid conflicts/overwrites
+        filename = "default.mp4"
+        video_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_default.mp4")
+        subprocess.run(['cp', default_video_path, video_path])
+
     print(f"\n{'='*80}")
     print(f"📥 New Chunked Request: {task_id}")
     print(f"   Video: {filename}")
     print(f"   Text: {text[:50]}...")
-    print(f"   Mode: 3 GPU Parallel Chunking")
+    print(f"   Mode: 3 GPU Parallel Chunking (Async)")
     print(f"{'='*80}\n")
     
-    # Step 1: Extract audio from video
-    print(f"🎵 Extracting audio from video...")
-    reference_audio = extract_audio_from_video(video_path)
+    # Register initially
+    scheduler.set_preprocessing_status(task_id, "Initializing...")
     
-    if not reference_audio:
-        return jsonify({"error": "Audio extraction failed"}), 500
-    
-    print(f"✅ Audio extracted: {reference_audio}")
-    
-    # Step 2: Generate voice-cloned audio
-    print(f"🎤 Generating voice clone...")
-    cloned_audio = generate_voice_cloning(text, reference_audio)
-    
-    if not cloned_audio:
-        return jsonify({"error": "Voice cloning failed"}), 500
-    
-    print(f"✅ Voice cloned: {cloned_audio}")
-    
-    # Step 3: Add to chunked scheduler
-    print(f"🎬 Starting chunked processing (3 GPUs parallel)...")
-    scheduler.add_task(
-        video_path=video_path,
-        audio_path=cloned_audio,
-        text=text,
-        task_id=task_id
-    )
+    # Start background thread
+    thread = threading.Thread(target=process_task_background, args=(task_id, text, video_path))
+    thread.daemon = True
+    thread.start()
     
     return jsonify({
         "success": True,
         "task_id": task_id,
-        "message": "Chunked video generation started (3 GPUs parallel)",
-        "mode": "chunked_parallel",
-        "gpu_status": scheduler.get_gpu_status()
+        "message": "Task queued successfully",
+        "mode": "chunked_parallel_async"
     })
 
 
@@ -222,6 +269,22 @@ def download_video(task_id):
     else:
         return jsonify({"error": "Video not ready or not found"}), 404
 
+
+@app.route('/api/queue', methods=['GET'])
+def get_queue():
+    """Get current task queue status"""
+    with scheduler.lock:
+        queue_data = [
+            {
+                "task_id": t,
+                "status": scheduler.active_tasks[t]["status"],
+                "queued_at": scheduler.active_tasks[t].get("start_time", 0)
+            } for t in scheduler.active_tasks if scheduler.active_tasks[t]["status"] in ["queued", "splitting", "processing", "merging"]
+        ]
+        return jsonify({
+            "queue_size": len(queue_data),
+            "queue": queue_data
+        })
 
 @app.route('/api/gpu-status', methods=['GET'])
 def get_gpu_status():

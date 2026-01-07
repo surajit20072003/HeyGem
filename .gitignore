@@ -3,4 +3,62 @@ dist
 out
 .idea
 .DS_Store
+
+# Logs
 *.log*
+*.txt
+!requirements.txt
+!r.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+Heygem_env/
+
+# Sensitive credentials
+uploader/client_secrets.json
+uploader/token.json
+uploader/config.json
+
+# Video files
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.webm
+*.flv
+*.wmv
+
+# Audio files
+*.mp3
+*.wav
+*.flac
+*.aac
+*.ogg
+*.m4a
+*.wma
+
+# Output directories
+webapp/outputs/
+webapp/temp/
+webapp/uploads/
+webapp_chunked/outputs/
+webapp_chunked/temp/
+webapp_chunked/uploads/
+webapp_multi_video/outputs/
+webapp_multi_video/temp/
+webapp_multi_video/input_videos/
+
+# Default videos
+webapp/default.mp4
+webapp_chunked/default.mp4
+webapp_chunked/manual_chunk01.mp4
+
+# Service files
+*.service
+
+# IDE
+.vscode/

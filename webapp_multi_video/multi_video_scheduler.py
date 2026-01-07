@@ -44,7 +44,7 @@ class MultiVideoScheduler:
     def get_video_duration(self, video_file: str) -> float:
         """Get video duration using ffprobe"""
         cmd = [
-            'ffprobe', '-v', 'error',
+            '/usr/bin/ffprobe', '-v', 'error',
             '-show_entries', 'format=duration',
             '-of', 'default=noprint_wrappers=1:nokey=1',
             video_file
@@ -55,7 +55,7 @@ class MultiVideoScheduler:
     def get_audio_duration(self, audio_file: str) -> float:
         """Get audio duration using ffprobe"""
         cmd = [
-            'ffprobe', '-v', 'error',
+            '/usr/bin/ffprobe', '-v', 'error',
             '-show_entries', 'format=duration',
             '-of', 'default=noprint_wrappers=1:nokey=1',
             audio_file
@@ -114,7 +114,7 @@ class MultiVideoScheduler:
                 f.write(f"file '{video_path}'\n")
         
         cmd = [
-            'ffmpeg', '-y',
+            '/usr/bin/ffmpeg', '-y',
             '-f', 'concat',
             '-safe', '0',
             '-i', concat_file,
@@ -148,7 +148,7 @@ class MultiVideoScheduler:
             output = f"{base_name}_chunk{i+1:02d}.wav"
             
             cmd = [
-                'ffmpeg', '-y', '-i', audio_file,
+                '/usr/bin/ffmpeg', '-y', '-i', audio_file,
                 '-ss', str(start_time),
                 '-t', str(chunk_duration),
                 '-c', 'copy',
@@ -243,7 +243,7 @@ class MultiVideoScheduler:
         # Step 1: Get resolutions of all chunks
         resolutions = []
         for video in video_files:
-            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+            cmd = ['/usr/bin/ffprobe', '-v', 'error', '-select_streams', 'v:0',
                    '-show_entries', 'stream=width,height',
                    '-of', 'csv=p=0', video]
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -267,7 +267,7 @@ class MultiVideoScheduler:
                 # Need to scale
                 scaled_path = video.replace('-r.mp4', f'-scaled.mp4')
                 cmd = [
-                    'ffmpeg', '-y',
+                    '/usr/bin/ffmpeg', '-y',
                     '-hwaccel', 'cuda',  # GPU acceleration
                     '-i', video,
                     '-vf', f'scale={target_res[0]}:{target_res[1]}',
@@ -296,7 +296,7 @@ class MultiVideoScheduler:
         
         # Step 5: Concatenate with matching resolutions
         cmd = [
-            'ffmpeg', '-y',
+            '/usr/bin/ffmpeg', '-y',
             '-f', 'concat',
             '-safe', '0',
             '-i', list_file,
@@ -314,7 +314,7 @@ class MultiVideoScheduler:
         
         # Step 6: GPU encode final video
         cmd = [
-            'ffmpeg', '-y',
+            '/usr/bin/ffmpeg', '-y',
             '-hwaccel', 'cuda',
             '-i', temp_concat,
             '-c:v', 'h264_nvenc',
@@ -413,7 +413,8 @@ class MultiVideoScheduler:
             with self.lock:
                 self.active_tasks[task_id]["status"] = "merging"
             
-            output_file = f"/nvme0n1-disk/HeyGem/webapp_multi_video/outputs/output_{task_id}.mp4"
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            output_file = os.path.join(base_dir, "outputs", f"output_{task_id}.mp4")
             merge_success = self.merge_final_videos(sorted_videos, output_file)
             
             if merge_success:
@@ -425,6 +426,14 @@ class MultiVideoScheduler:
                     self.active_tasks[task_id]["elapsed"] = elapsed
                 
                 self.log(f"✅ Task completed! ({elapsed/60:.1f} mins)", task_id)
+
+                # Auto-Upload to YouTube/Vimeo
+                try:
+                    uploader_script = "/nvme0n1-disk/nvme01/HeyGem/uploader/upload_task.py"
+                    self.log(f"📤 Triggering auto-upload...", task_id)
+                    subprocess.Popen(['python3', uploader_script, output_file, '--task_id', task_id])
+                except Exception as e:
+                    self.log(f"❌ Failed to trigger uploader: {e}", task_id)
             else:
                 with self.lock:
                     self.active_tasks[task_id]["status"] = "failed"

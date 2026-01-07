@@ -270,7 +270,7 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:5002';
+        const API_URL = '';
         let activeTasks = [];
         let selectedVideoFiles = [];
         let selectedAudioFile = null;
@@ -369,7 +369,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    alert(`✅ Task submitted! ID: ${result.task_id}\n${result.input_videos} videos will be randomly merged.`);
+                    alert(`✅ Task submitted! ID: ${result.task_id}\n🎤 Voice Cloning: ${result.tts_duration}s\n${result.input_videos} videos will be randomly merged.`);
                     activeTasks.push(result.task_id);
 
                     // Clear inputs

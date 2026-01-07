@@ -273,7 +273,7 @@
         </div>
 
         <div class="info-box">
-            <strong>📊 How it works:</strong> Your audio is split into 3 equal chunks. Each chunk is processed 
+            <strong>📊 How it works:</strong> Your audio is split into 3 equal chunks. Each chunk is processed
             simultaneously on a different GPU, then merged into the final video. This is faster for longer videos!
         </div>
 
@@ -301,7 +301,7 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:5001';
+        const API_URL = '';
         let activeTasks = [];
 
         // Upload zone handlers
@@ -341,8 +341,7 @@
             const text = document.getElementById('textInput').value;
 
             if (!file) {
-                alert('Please select a video file');
-                return;
+                console.log("No file selected, using default");
             }
 
             if (!text) {
@@ -355,7 +354,9 @@
             submitBtn.textContent = '⏳ Processing...';
 
             const formData = new FormData();
-            formData.append('video', file);
+            if (file) {
+                formData.append('video', file);
+            }
             formData.append('text', text);
 
             try {
@@ -367,7 +368,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    alert(`✅ Chunked task submitted! ID: ${result.task_id}`);
+                    alert(`✅ Chunked task submitted! ID: ${result.task_id}\nProcessing started in background.`);
                     activeTasks.push(result.task_id);
                     videoFile.value = '';
                     fileName.textContent = '';
@@ -427,19 +428,22 @@
                     let downloadBtn = '';
                     let chunkHTML = '';
 
-                    if (status.status === 'splitting') {
+                    if (status.status === 'preparing') {
+                        statusClass = 'status-splitting';
+                        statusText = `⏳ ${status.message}`;
+                    } else if (status.status === 'splitting') {
                         statusClass = 'status-splitting';
                         statusText = 'Splitting Audio';
                     } else if (status.status === 'processing') {
                         statusClass = 'status-processing';
                         statusText = 'Processing Chunks (3 GPUs)';
-                        
+
                         // Show chunk progress
                         chunkHTML = '<div class="chunk-progress">';
                         for (let i = 0; i < 3; i++) {
                             chunkHTML += `
                                 <div class="chunk-item">
-                                    <span class="chunk-label">GPU ${i} (Chunk ${i+1})</span>
+                                    <span class="chunk-label">GPU ${i} (Chunk ${i + 1})</span>
                                     <div class="progress-bar">
                                         <div class="progress-fill" style="width: 75%"></div>
                                     </div>
@@ -453,7 +457,10 @@
                         statusText = 'Merging Video Chunks';
                     } else if (status.status === 'completed') {
                         statusClass = 'status-completed';
-                        statusText = 'Completed';
+                        statusText = `Completed<br>
+                                      <small>🎤 Voice: ${status.tts_duration ? status.tts_duration.toFixed(2) : '0.00'}s</small> | 
+                                      <small>🎬 Video: ${status.elapsed_seconds}s</small><br>
+                                      <small>💾 Peak GPU Mem: <strong>${status.gpu_memory_usage || 'N/A'}</strong></small>`;
                         downloadBtn = `<a href="${API_URL}/api/download/${taskId}" class="download-btn">⬇️ Download</a>`;
                     } else if (status.status === 'failed') {
                         statusClass = 'status-failed';

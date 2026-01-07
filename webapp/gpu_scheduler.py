@@ -23,8 +23,20 @@ class SimpleGPUScheduler:
         }
         self.task_queue = []  # FIFO queue
         self.active_tasks = {}  # {task_id: {gpu_id, status, start_time}}
+        self.pre_processing_tasks = {} # {task_id: "status_message"}
         self.completed_tasks = []
         self.lock = threading.Lock()
+
+    def get_gpu_memory(self, gpu_id: int) -> str:
+        """Get current GPU memory usage via nvidia-smi (returns string '1234 MiB')"""
+        try:
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader,nounits', '-i', str(gpu_id)],
+                capture_output=True, text=True
+            )
+            return f"{result.stdout.strip()} MiB"
+        except Exception:
+            return "0 MiB"
         
     def find_available_gpu(self) -> Optional[int]:
         """
@@ -41,9 +53,9 @@ class SimpleGPUScheduler:
         """Get status of all GPUs"""
         with self.lock:
             return {
-                "gpu0": "busy" if self.gpu_config[0]["busy"] else "free",
-                "gpu1": "busy" if self.gpu_config[1]["busy"] else "free",
-                "gpu2": "busy" if self.gpu_config[2]["busy"] else "free",
+                "gpu0": {"status": "busy" if self.gpu_config[0]["busy"] else "free", "memory": self.get_gpu_memory(0)},
+                "gpu1": {"status": "busy" if self.gpu_config[1]["busy"] else "free", "memory": self.get_gpu_memory(1)},
+                "gpu2": {"status": "busy" if self.gpu_config[2]["busy"] else "free", "memory": self.get_gpu_memory(2)},
                 "queue_size": len(self.task_queue),
                 "active_tasks": len([t for t in self.active_tasks.values() if t["status"] == "running"]),
                 "completed": len(self.completed_tasks)
@@ -90,8 +102,7 @@ class SimpleGPUScheduler:
             result = response.json()
             
             if result.get('success'):
-                with self.lock:
-                    self.gpu_config[gpu_id]["busy"] = True
+                # GPU is already marked busy by process_next_in_queue
                 print(f"✅ Task '{task_id}' → GPU {gpu_id} (Port {port})")
                 return True
             else:
@@ -105,16 +116,74 @@ class SimpleGPUScheduler:
             return False
     
     def monitor_task(self, task_id: str, gpu_id: int, video_path: str, audio_path: str):
-        """Monitor task until completion"""
+        """Monitor task until completion with timeout and failure detection"""
         port = self.gpu_config[gpu_id]["port"]
         # Output is written to /code/data/temp/ inside container -> ~/heygem_data/gpu{id}/temp/ on host
         output_file = os.path.expanduser(f"~/heygem_data/gpu{gpu_id}/temp/{task_id}-r.mp4")
         start_time = time.time()
         
+        # NEW: Add timeout (10 minutes max)
+        MAX_WAIT_TIME = 600  # 10 minutes
+        CHECK_INTERVAL = 5   # Check GPU API every 5 seconds
+        
         print(f"🔍 Monitoring task '{task_id}' on GPU {gpu_id}")
         print(f"   Watching for: {output_file}")
+        print(f"   Timeout: {MAX_WAIT_TIME}s")
+        
+        max_memory = 0 # Track peak usage
+        last_api_check = 0
         
         while True:
+            elapsed = time.time() - start_time
+            
+            # NEW: Check timeout
+            if elapsed > MAX_WAIT_TIME:
+                print(f"⏰ TIMEOUT: Task '{task_id}' exceeded {MAX_WAIT_TIME}s")
+                with self.lock:
+                    self.gpu_config[gpu_id]["busy"] = False
+                    print(f"🟢 GPU {gpu_id} FREED (timeout)")
+                    self.active_tasks[task_id]["status"] = "failed"
+                    self.active_tasks[task_id]["error"] = f"Timeout after {MAX_WAIT_TIME}s"
+                    self.active_tasks[task_id]["elapsed"] = elapsed
+                self.process_next_in_queue()
+                return
+            
+            # NEW: Check GPU API for task status (every 5 seconds)
+            if time.time() - last_api_check > CHECK_INTERVAL:
+                last_api_check = time.time()
+                try:
+                    response = requests.get(
+                        f"http://127.0.0.1:{port}/easy/query?code={task_id}",
+                        timeout=3
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        data = result.get('data', {})
+                        status_code = data.get('status', 0)
+                        
+                        # Status codes: 0=pending, 1=processing, 2=completed, 3=failed
+                        if status_code == 3:  # Failed
+                            error_msg = data.get('msg', 'Unknown error')
+                            print(f"❌ GPU reports FAILED: {task_id}")
+                            print(f"   Error: {error_msg[:200]}")
+                            
+                            with self.lock:
+                                self.gpu_config[gpu_id]["busy"] = False
+                                print(f"🟢 GPU {gpu_id} FREED (task failed)")
+                                self.active_tasks[task_id]["status"] = "failed"
+                                self.active_tasks[task_id]["error"] = error_msg[:500]
+                                self.active_tasks[task_id]["elapsed"] = elapsed
+                            
+                            self.process_next_in_queue()
+                            return
+                        elif status_code == 2:  # Completed but file not found yet
+                            print(f"   ℹ️ GPU reports completed, waiting for file...")
+                            
+                except Exception as e:
+                    # API check failed, continue waiting
+                    pass
+            
+            # Check if output file exists
             if os.path.exists(output_file):
                 # Wait for file to be completely written by checking size stability
                 prev_size = 0
@@ -138,12 +207,15 @@ class SimpleGPUScheduler:
                     
                     # Copy to outputs directory
                     output_name = f"output_{task_id}.mp4"
-                    output_dest = f"/nvme0n1-disk/HeyGem/webapp/outputs/{output_name}"
+                    output_dest = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs", output_name)
                     subprocess.run(['cp', output_file, output_dest])
                     
                     # Update status
+                    # Use the peak memory observed during polling
+                    final_mem = f"{max_memory} MiB (Peak)" if max_memory > 0 else "Unknown"
                     with self.lock:
                         self.gpu_config[gpu_id]["busy"] = False
+                        print(f"🟢 GPU {gpu_id} FREED (completed)")
                         self.active_tasks[task_id]["status"] = "completed"
                         self.active_tasks[task_id]["elapsed"] = elapsed
                         self.active_tasks[task_id]["output"] = output_name
@@ -151,18 +223,41 @@ class SimpleGPUScheduler:
                             "task_id": task_id,
                             "gpu_id": gpu_id,
                             "elapsed": elapsed,
-                            "output": output_name
+                            "output": output_name,
+                            "tts_duration": self.active_tasks[task_id].get("tts_duration", 0.0),
+                            "gpu_memory_usage": final_mem,
+                            "completed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         })
                     
                     print(f"✅ '{task_id}' completed on GPU {gpu_id} ({elapsed/60:.1f} mins)")
+                    
+                    # Auto-Upload to YouTube/Vimeo
+                    try:
+                        uploader_script = "/nvme0n1-disk/nvme01/HeyGem/uploader/upload_task.py"
+                        print(f"📤 Triggering auto-upload for {task_id}...")
+                        subprocess.Popen(['python3', uploader_script, output_dest, '--task_id', task_id])
+                    except Exception as e:
+                        print(f"❌ Failed to trigger uploader: {e}")
                     
                     # Process next task in queue
                     self.process_next_in_queue()
                     break
             
-            time.sleep(5)
+            
+            # Polling Logic: Check usage every 2 seconds while waiting
+            # Only if GPU is marked busy (which it is)
+            current_mem_str = self.get_gpu_memory(gpu_id)
+            try:
+                # Extract number from "1234 MiB"
+                mem_val = int(current_mem_str.split()[0])
+                if mem_val > max_memory:
+                    max_memory = mem_val
+            except:
+                pass
+
+            time.sleep(2)
     
-    def add_task(self, video_path: str, audio_path: str, text: str = "", task_id: str = None):
+    def add_task(self, video_path: str, audio_path: str, text: str = "", task_id: str = None, tts_duration: float = 0.0):
         """Add task to queue"""
         if task_id is None:
             task_id = f"task_{int(time.time())}"
@@ -172,6 +267,7 @@ class SimpleGPUScheduler:
             "video_path": video_path,
             "audio_path": audio_path,
             "text": text,
+            "tts_duration": tts_duration,
             "status": "queued",
             "queued_at": time.time()
         }
@@ -188,16 +284,25 @@ class SimpleGPUScheduler:
     
     def process_next_in_queue(self):
         """Process next task if GPU available"""
-        gpu_id = self.find_available_gpu()
-        
-        if gpu_id is None:
-            return  # All GPUs busy
-        
+        # CRITICAL FIX: Find GPU and mark it busy ATOMICALLY in one lock to prevent race conditions
         with self.lock:
             if not self.task_queue:
                 return  # Queue empty
             
+            # Find available GPU while holding the lock
+            gpu_id = None
+            for gid in [0, 1, 2]:
+                if not self.gpu_config[gid]["busy"]:
+                    gpu_id = gid
+                    break
+            
+            if gpu_id is None:
+                return  # All GPUs busy
+            
+            # Pop task and mark GPU as busy ATOMICALLY
             task = self.task_queue.pop(0)  # FIFO
+            self.gpu_config[gpu_id]["busy"] = True
+            print(f"🔒 LOCKED: Assigned GPU {gpu_id} to task {task['task_id']}")
         
         task_id = task["task_id"]
         
@@ -226,12 +331,14 @@ class SimpleGPUScheduler:
                     "start_time": time.time(),
                     "video": task["video_path"],
                     "audio": task["audio_path"],
-                    "text": task.get("text", "")
+                    "text": task.get("text", ""),
+                    "tts_duration": task.get("tts_duration", 0.0)
                 }
         else:
-            # Re-queue on failure
+            # Re-queue on failure and FREE GPU
             with self.lock:
                 self.task_queue.insert(0, task)
+                self.gpu_config[gpu_id]["busy"] = False
     
     def get_task_status(self, task_id: str) -> Dict:
         """Get status of specific task"""
@@ -252,6 +359,10 @@ class SimpleGPUScheduler:
                         "status": "completed",
                         "gpu_id": task["gpu_id"],
                         "elapsed_seconds": int(task["elapsed"]),
+                        "tts_duration": float(task.get("tts_duration", 0.0)),
+                        "tts_duration": float(task.get("tts_duration", 0.0)),
+                        "gpu_memory_usage": task.get("gpu_memory_usage", "N/A"),
+                        "completed_at": task.get("completed_at", ""),
                         "output": task.get("output", "")
                     }
             
@@ -264,7 +375,25 @@ class SimpleGPUScheduler:
                         "queue_position": position
                     }
             
+            # Check if in pre-processing
+            if task_id in self.pre_processing_tasks:
+                 return {
+                     "status": "preparing",
+                     "message": self.pre_processing_tasks[task_id]
+                 }
+
             return {"status": "not_found"}
+
+    def set_preprocessing_status(self, task_id: str, status_msg: str):
+        """Update status for tasks in audio/TTS phase"""
+        with self.lock:
+            self.pre_processing_tasks[task_id] = status_msg
+            
+    def clear_preprocessing_status(self, task_id: str):
+        """Remove from pre-processing (once moved to GPU queue)"""
+        with self.lock:
+             if task_id in self.pre_processing_tasks:
+                 del self.pre_processing_tasks[task_id]
 
 
 # Global scheduler instance

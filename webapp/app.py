@@ -10,14 +10,20 @@ import subprocess
 import time
 from werkzeug.utils import secure_filename
 from gpu_scheduler import scheduler
+from text_normalization import latex_to_speech
 
 app = Flask(__name__)
 CORS(app)
 
+import threading
+
 # Configuration
-UPLOAD_FOLDER = '/nvme0n1-disk/HeyGem/webapp/uploads'
-OUTPUT_FOLDER = '/nvme0n1-disk/HeyGem/webapp/outputs'
-TEMP_FOLDER = '/nvme0n1-disk/HeyGem/webapp/temp'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Default video path
+DEFAULT_VIDEO_PATH = os.path.join(BASE_DIR, 'default.mp4')
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+OUTPUT_FOLDER = os.path.join(BASE_DIR, 'outputs')
+TEMP_FOLDER = os.path.join(BASE_DIR, 'temp')
 TTS_API = 'http://localhost:18181'  # New working Fish-Speech container
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -34,11 +40,9 @@ def extract_audio_from_video(video_path: str) -> str:
     audio_output = os.path.join(TEMP_FOLDER, f"ref_audio_{int(time.time())}.wav")
     
     try:
-        subprocess.run([
-            'ffmpeg', '-i', video_path,
-            '-vn', '-acodec', 'pcm_s16le', '-ar', '44100',
-            audio_output, '-y'
-        ], check=True, capture_output=True)
+        # Extract audio using ffmpeg, limit to 15 seconds for better TTS stability
+        cmd = ['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', '-t', '15', audio_output]
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         
         return audio_output
     except Exception as e:
@@ -59,7 +63,7 @@ def generate_voice_cloning(text: str, reference_audio: str) -> str:
     print(f"   📝 TTS Request: '{text[:80]}...' ({len(text)} chars)")
     
     # Copy reference audio to TTS data directory
-    tts_ref_dir = os.path.expanduser("~/heygem_data/voice/data/reference")
+    tts_ref_dir = os.path.expanduser("~/heygem_data/tts/reference")
     os.makedirs(tts_ref_dir, exist_ok=True)
     
     ref_filename = os.path.basename(reference_audio)
@@ -67,6 +71,11 @@ def generate_voice_cloning(text: str, reference_audio: str) -> str:
     subprocess.run(['cp', reference_audio, tts_ref_path])
     
     # TTS API call
+    # Normalize Math/LaTeX if present
+    print(f"   📐 Normalizing Text (Before): {text[:50]}...")
+    text = latex_to_speech(text)
+    print(f"   📐 Normalizing Text (After):  {text[:50]}...")
+
     payload = {
         "text": text,
         "reference_audio": f"/code/data/reference/{ref_filename}",
@@ -78,7 +87,7 @@ def generate_voice_cloning(text: str, reference_audio: str) -> str:
         response = requests.post(
             f"{TTS_API}/v1/invoke",
             json=payload,
-            timeout=240  # Longer timeout for voice cloning
+            timeout=6000 # Increased timeout for long text
         )
         
         print(f"   Status: {response.status_code}, Size: {len(response.content)} bytes")
@@ -130,66 +139,97 @@ def generate_video():
     Input: video file + text
     """
     # Validate input
-    if 'video' not in request.files:
-        return jsonify({"error": "No video file provided"}), 400
+    video_file = request.files.get('video')
     
     if 'text' not in request.form:
         return jsonify({"error": "No text provided"}), 400
-    
-    video_file = request.files['video']
+        
     text = request.form['text']
-    
-    if video_file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-    
-    if not allowed_video_file(video_file.filename):
-        return jsonify({"error": "Invalid video format"}), 400
-    
-    # Save uploaded video
-    filename = secure_filename(video_file.filename)
+        
+    # Generate task_id early so it's available for all paths
+        
+    # Generate task_id early so it's available for all paths
     task_id = f"task_{int(time.time())}"
-    video_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
-    video_file.save(video_path)
+    
+    if video_file and video_file.filename != '' and allowed_video_file(video_file.filename):
+        filename = secure_filename(video_file.filename)
+        video_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
+        video_file.save(video_path)
+        print(f"   ✅ Video Uploaded: {filename}")
+    else:
+        # Use default video
+        if os.path.exists(DEFAULT_VIDEO_PATH):
+            video_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_default.mp4")
+            subprocess.run(['cp', DEFAULT_VIDEO_PATH, video_path])
+            print(f"   ⚠️ No video uploaded, using DEFAULT video")
+        else:
+            return jsonify({"error": "No video provided and default video missing"}), 400
     
     print(f"\n{'='*80}")
     print(f"📥 New Request: {task_id}")
-    print(f"   Video: {filename}")
+    print(f"   Video: {os.path.basename(video_path)}")
     print(f"   Text: {text[:50]}...")
     print(f"{'='*80}\n")
     
-    # Step 1: Extract audio from video
-    print(f"🎵 Extracting audio from video...")
-    reference_audio = extract_audio_from_video(video_path)
+    # Register initially
+    scheduler.set_preprocessing_status(task_id, "Initializing...")
     
-    if not reference_audio:
-        return jsonify({"error": "Audio extraction failed"}), 500
-    
-    print(f"✅ Audio extracted: {reference_audio}")
-    
-    # Step 2: Generate voice-cloned audio
-    print(f"🎤 Generating voice clone...")
-    cloned_audio = generate_voice_cloning(text, reference_audio)
-    
-    if not cloned_audio:
-        return jsonify({"error": "Voice cloning failed"}), 500
-    
-    print(f"✅ Voice cloned: {cloned_audio}")
-    
-    # Step 3: Add to GPU scheduler
-    print(f"🎬 Adding to GPU queue...")
-    scheduler.add_task(
-        video_path=video_path,
-        audio_path=cloned_audio,
-        text=text,
-        task_id=task_id
-    )
+    # Start background processing
+    thread = threading.Thread(target=process_task_background, args=(task_id, text, video_path))
+    thread.daemon = True
+    thread.start()
     
     return jsonify({
         "success": True,
         "task_id": task_id,
-        "message": "Video generation started",
+        "message": "Task queued successfully",
         "queue_status": scheduler.get_gpu_status()
     })
+
+def process_task_background(task_id, text, video_path):
+    """Background task for audio extraction and TTS"""
+    start_time = time.time()
+    try:
+        print(f"🔄 [Task {task_id}] Background processing started...")
+        scheduler.set_preprocessing_status(task_id, "Extracting Audio...")
+        
+        # Update scheduler status to 'processing_audio' (Optional, scheduler keeps track)
+        
+        # Step 1: Extract audio from video
+        print(f"🎵 [Task {task_id}] Extracting audio...")
+        reference_audio = extract_audio_from_video(video_path)
+        
+        if not reference_audio:
+            print(f"❌ [Task {task_id}] Audio extraction failed")
+            return
+        
+        
+        # Step 2: Generate voice-cloned audio
+        print(f"🎤 [Task {task_id}] Generating voice clone...")
+        scheduler.set_preprocessing_status(task_id, "Cloning Voice (This may take a few minutes)...")
+        cloned_audio = generate_voice_cloning(text, reference_audio)
+        
+        if not cloned_audio:
+            print(f"❌ [Task {task_id}] Voice cloning failed")
+            return
+            
+        tts_duration = time.time() - start_time
+        print(f"✅ [Task {task_id}] Voice cloned (took {tts_duration:.2f}s)")
+        
+        # Step 3: Add to GPU scheduler
+        print(f"🎬 [Task {task_id}] Adding to GPU queue...")
+        scheduler.clear_preprocessing_status(task_id) # Remove from pre-processing
+        scheduler.add_task(
+            video_path=video_path,
+            audio_path=cloned_audio,
+            text=text,
+            task_id=task_id,
+            tts_duration=tts_duration
+        )
+        
+    except Exception as e:
+        print(f"❌ [Task {task_id}] Background Process Error: {e}")
+        scheduler.set_preprocessing_status(task_id, f"Error: {str(e)}")
 
 @app.route('/api/status/<task_id>', methods=['GET'])
 def get_status(task_id):
@@ -216,7 +256,75 @@ def download_video(task_id):
 @app.route('/api/queue', methods=['GET'])
 def get_queue_status():
     """Get overall queue and GPU status"""
-    return jsonify(scheduler.get_gpu_status())
+    status = scheduler.get_gpu_status()
+    
+    # Add detailed queue list
+    with scheduler.lock:
+        queue_data = [
+            {
+                "task_id": t["task_id"],
+                "status": "queued",
+                "queued_at": t["queued_at"]
+            } for t in scheduler.task_queue
+        ]
+        
+        # Add active tasks too
+        for t_id, t_data in scheduler.active_tasks.items():
+            if t_data["status"] == "running":
+                queue_data.insert(0, {
+                    "task_id": t_id,
+                    "status": "running",
+                    "gpu_id": t_data["gpu_id"],
+                    "start_time": t_data["start_time"]
+                })
+
+    status["queue"] = queue_data
+    return jsonify(status)
+
+
+@app.route('/api/admin/reset-gpus', methods=['POST'])
+def reset_gpus():
+    """
+    Emergency GPU status reset
+    Use when GPUs are stuck in 'busy' state
+    """
+    print("\n" + "="*80)
+    print("🚨 ADMIN: Manual GPU Reset Triggered")
+    print("="*80)
+    
+    with scheduler.lock:
+        reset_count = 0
+        # Free all GPUs
+        for gpu_id in scheduler.gpu_config:
+            if scheduler.gpu_config[gpu_id]["busy"]:
+                print(f"   🟢 GPU {gpu_id}: busy → free")
+                scheduler.gpu_config[gpu_id]["busy"] = False
+                reset_count += 1
+        
+        # Mark stuck running tasks as failed
+        failed_count = 0
+        for task_id, task_data in scheduler.active_tasks.items():
+            if task_data["status"] == "running":
+                print(f"   ❌ Task {task_id}: running → failed (manual reset)")
+                task_data["status"] = "failed"
+                task_data["error"] = "Manual GPU reset"
+                failed_count += 1
+    
+    # Trigger queue processing
+    print(f"   ✅ Reset complete: {reset_count} GPUs freed, {failed_count} tasks failed")
+    print(f"   🔄 Triggering queue processing...")
+    print("="*80 + "\n")
+    
+    scheduler.process_next_in_queue()
+    
+    return jsonify({
+        "success": True,
+        "message": "All GPUs reset successfully",
+        "gpus_freed": reset_count,
+        "tasks_failed": failed_count,
+        "queue_size": len(scheduler.task_queue),
+        "gpu_status": scheduler.get_gpu_status()
+    })
 
 @app.route('/health', methods=['GET'])
 def health():

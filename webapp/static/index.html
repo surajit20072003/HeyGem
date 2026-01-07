@@ -182,7 +182,7 @@
 
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #667eea, ##764ba2);
+            background: linear-gradient(90deg, #667eea, #764ba2);
             transition: width 0.3s;
         }
 
@@ -229,12 +229,16 @@
         </button>
 
         <div class="tasks-list" id="tasksList">
-            <h2>📋 Active Tasks</h2>
+            <h2>📋 Active Tasks (Yours)</h2>
+        </div>
+
+        <div class="tasks-list" id="globalQueue">
+            <!-- Global Queue List will go here -->
         </div>
     </div>
 
     <script>
-        const API_URL = 'http://localhost:5000';
+        const API_URL = '';
         let activeTasks = [];
 
         // Upload zone handlers
@@ -274,8 +278,7 @@
             const text = document.getElementById('textInput').value;
 
             if (!file) {
-                alert('Please select a video file');
-                return;
+                console.log("No file selected, using default");
             }
 
             if (!text) {
@@ -288,7 +291,9 @@
             submitBtn.textContent = '⏳ Processing...';
 
             const formData = new FormData();
-            formData.append('video', file);
+            if (file) {
+                formData.append('video', file);
+            }
             formData.append('text', text);
 
             try {
@@ -300,7 +305,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    alert(`✅ Task submitted! ID: ${result.task_id}`);
+                    alert(`✅ Task submitted! ID: ${result.task_id}\nProcessing started in background.`);
                     activeTasks.push(result.task_id);
                     videoFile.value = '';
                     fileName.textContent = '';
@@ -346,6 +351,24 @@
                 // Replace entire GPU status
                 document.getElementById('gpuStatus').innerHTML = gpuHTML;
 
+                // Update Global Queue List
+                const globalQueueDiv = document.getElementById('globalQueue');
+                if (status.queue && status.queue.length > 0) {
+                    let queueHTML = '<h3>🌍 Global Queue Status</h3><div style="background:#fff; padding:15px; border-radius:10px; margin-top:10px;">';
+                    status.queue.forEach((task, index) => {
+                        queueHTML += `
+                            <div style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between;">
+                                <span>#${index + 1} <strong>${task.task_id}</strong></span>
+                                <span class="task-status ${task.status === 'running' ? 'status-running' : 'status-queued'}">${task.status.toUpperCase()}</span>
+                            </div>
+                         `;
+                    });
+                    queueHTML += '</div>';
+                    globalQueueDiv.innerHTML = queueHTML;
+                } else {
+                    globalQueueDiv.innerHTML = '';
+                }
+
             } catch (error) {
                 console.error('GPU status error:', error);
             }
@@ -375,11 +398,18 @@
                         progress = Math.min(95, (status.elapsed_seconds / 300) * 100);
                     } else if (status.status === 'completed') {
                         statusClass = 'status-completed';
-                        statusText = 'Completed';
+                        statusText = `Completed<br>
+                                      <small>🎤 Voice: ${status.tts_duration ? status.tts_duration.toFixed(2) : '0.00'}s</small> | 
+                                      <small>🎬 Video: ${status.elapsed_seconds}s</small><br>
+                                      <small>💾 Peak GPU Mem: <strong>${status.gpu_memory_usage || 'N/A'}</strong></small>`;
                         progress = 100;
                         downloadBtn = `<a href="${API_URL}/api/download/${taskId}" class="download-btn">⬇️ Download</a>`;
                     } else if (status.status === 'queued') {
                         statusText = `Queued (Position: ${status.queue_position})`;
+                    } else if (status.status === 'preparing') {
+                        statusClass = 'status-queued';
+                        statusText = `⏳ ${status.message}`;
+                        progress = 5; // Show small progress
                     }
 
                     html += `

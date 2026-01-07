@@ -15,10 +15,11 @@ app = Flask(__name__)
 CORS(app)
 
 # Configuration
-UPLOAD_FOLDER = '/nvme0n1-disk/HeyGem/webapp_multi_video/uploads'
-INPUT_VIDEOS_FOLDER = '/nvme0n1-disk/HeyGem/webapp_multi_video/input_videos'
-OUTPUT_FOLDER = '/nvme0n1-disk/HeyGem/webapp_multi_video/outputs'
-TEMP_FOLDER = '/nvme0n1-disk/HeyGem/webapp_multi_video/temp'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+INPUT_VIDEOS_FOLDER = os.path.join(BASE_DIR, 'input_videos')
+OUTPUT_FOLDER = os.path.join(BASE_DIR, 'outputs')
+TEMP_FOLDER = os.path.join(BASE_DIR, 'temp')
 TTS_API = 'http://localhost:18181'
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -46,7 +47,7 @@ def generate_voice_cloning(text: str, reference_audio: str) -> str:
     print(f"   📝 TTS Request: '{text[:80]}...' ({len(text)} chars)")
     
     # Copy to TTS directory
-    tts_ref_dir = os.path.expanduser("~/heygem_data/voice/data/reference")
+    tts_ref_dir = os.path.expanduser("~/heygem_data/tts/reference")
     os.makedirs(tts_ref_dir, exist_ok=True)
     
     ref_filename = os.path.basename(reference_audio)
@@ -163,12 +164,14 @@ def generate_video():
     
     # Generate voice clone
     print(f"🎤 Generating voice clone...")
+    tts_start_time = time.time()
     cloned_audio = generate_voice_cloning(text, ref_audio_path)
+    tts_duration = time.time() - tts_start_time
     
     if not cloned_audio:
         return jsonify({"error": "Voice cloning failed"}), 500
     
-    print(f"✅ Voice cloned: {cloned_audio}")
+    print(f"✅ Voice cloned: {cloned_audio} (took {tts_duration:.2f}s)")
     
     # Start multi-video processing
     print(f"🎬 Starting multi-video processing...")
@@ -184,6 +187,7 @@ def generate_video():
         "message": "Multi-video generation started (Random merge mode)",
         "mode": "multi_video_random",
         "input_videos": len(input_video_paths),
+        "tts_duration": round(tts_duration, 2),
         "gpu_status": scheduler.get_gpu_status()
     })
 
