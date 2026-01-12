@@ -123,7 +123,7 @@ class SimpleGPUScheduler:
         start_time = time.time()
         
         # NEW: Add timeout (10 minutes max)
-        MAX_WAIT_TIME = 600  # 10 minutes
+        MAX_WAIT_TIME = 3600
         CHECK_INTERVAL = 5   # Check GPU API every 5 seconds
         
         print(f"🔍 Monitoring task '{task_id}' on GPU {gpu_id}")
