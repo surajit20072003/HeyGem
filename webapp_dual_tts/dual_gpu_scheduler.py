@@ -663,9 +663,8 @@ scheduler = DualGPUScheduler()
 
 
 if __name__ == "__main__":
-    print("🚀 Triple GPU Scheduler with Dedicated TTS Services")
+    print("🚀 Dual GPU Scheduler with Dedicated TTS Services")
     print("=" * 80)
     print("GPU 0 (Port 8390) → TTS (Port 18182) [heygem-tts-dual-0]")
     print("GPU 1 (Port 8391) → TTS (Port 18183) [heygem-tts-dual-1]")
-    print("GPU 2 (Port 8392) → TTS (Port 18184) [heygem-tts-dual-2]")
     print("=" * 80)
