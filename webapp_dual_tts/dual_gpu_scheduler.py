@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Dual GPU Scheduler with Dedicated TTS Containers
-- GPU 0 (Port 8390) → TTS 0 (Port 18180)
-- GPU 1 (Port 8391) → TTS 1 (Port 18181)
+Triple GPU Scheduler with Dedicated TTS Containers
+- GPU 0 (Port 8390) → TTS 0 (Port 18182)
+- GPU 1 (Port 8391) → TTS 1 (Port 18183)
+- GPU 2 (Port 8392) → TTS 2 (Port 18184)
 - Proper queue management
-- No GPU 2 usage
 """
 import requests
 import json
@@ -19,7 +19,7 @@ from typing import Dict, Optional
 
 class DualGPUScheduler:
     def __init__(self):
-        # 2 GPUs with dedicated TTS services
+        # 3 GPUs with dedicated TTS services
         self.gpu_config = {
             0: {
                 "port": 8390,
@@ -30,6 +30,12 @@ class DualGPUScheduler:
             1: {
                 "port": 8391,
                 "tts_port": 18183,  # Dedicated TTS for GPU 1 (heygem-tts-dual-1)
+                "busy": False,
+                "current_task": None
+            },
+            2: {
+                "port": 8392,
+                "tts_port": 18184,  # Dedicated TTS for GPU 2 (heygem-tts-dual-2)
                 "busy": False,
                 "current_task": None
             }
@@ -43,9 +49,10 @@ class DualGPUScheduler:
         # Threading
         self.lock = threading.Lock()
         
-        print("🚀 Dual GPU Scheduler Initialized")
+        print("🚀 Triple GPU Scheduler Initialized")
         print(f"   GPU 0: Video Port {self.gpu_config[0]['port']}, TTS Port {self.gpu_config[0]['tts_port']} (heygem-tts-dual-0)")
         print(f"   GPU 1: Video Port {self.gpu_config[1]['port']}, TTS Port {self.gpu_config[1]['tts_port']} (heygem-tts-dual-1)")
+        print(f"   GPU 2: Video Port {self.gpu_config[2]['port']}, TTS Port {self.gpu_config[2]['tts_port']} (heygem-tts-dual-2)")
 
     def get_gpu_memory(self, gpu_id: int) -> str:
         """Get current GPU memory usage via nvidia-smi"""
@@ -71,11 +78,11 @@ class DualGPUScheduler:
 
     def find_available_gpu(self) -> Optional[int]:
         """
-        Find first free GPU (0 or 1)
-        Returns: GPU ID or None if both busy
+        Find first free GPU (0, 1, or 2)
+        Returns: GPU ID or None if all busy
         """
         with self.lock:
-            for gpu_id in [0, 1]:  # Only GPU 0 and 1
+            for gpu_id in [0, 1, 2]:  # All 3 GPUs
                 if not self.gpu_config[gpu_id]["busy"]:
                     return gpu_id
         return None
@@ -87,7 +94,7 @@ class DualGPUScheduler:
         Returns: GPU ID if available, None if all busy (task should queue)
         """
         with self.lock:
-            for gpu_id in [0, 1]:
+            for gpu_id in [0, 1, 2]:  # Check all 3 GPUs
                 if not self.gpu_config[gpu_id]["busy"]:
                     # Reserve immediately - atomic operation
                     self.gpu_config[gpu_id]["busy"] = True
@@ -527,7 +534,7 @@ class DualGPUScheduler:
         # Check for available GPU and reserve it atomically
         gpu_id = None
         with self.lock:
-            for gid in [0, 1]:
+            for gid in [0, 1, 2]:  # Check all 3 GPUs
                 if not self.gpu_config[gid]["busy"]:
                     gpu_id = gid
                     break
@@ -656,8 +663,9 @@ scheduler = DualGPUScheduler()
 
 
 if __name__ == "__main__":
-    print("🚀 Dual GPU Scheduler with Dedicated TTS Services")
+    print("🚀 Triple GPU Scheduler with Dedicated TTS Services")
     print("=" * 80)
     print("GPU 0 (Port 8390) → TTS (Port 18182) [heygem-tts-dual-0]")
     print("GPU 1 (Port 8391) → TTS (Port 18183) [heygem-tts-dual-1]")
+    print("GPU 2 (Port 8392) → TTS (Port 18184) [heygem-tts-dual-2]")
     print("=" * 80)

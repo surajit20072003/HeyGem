@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Flask API Server for Dual GPU + Dual TTS Setup
-- 2 GPUs (GPU 0 + GPU 1)
-- 2 TTS services (18180 for GPU 0, 18181 for GPU 1)
+Flask API Server for Triple GPU + Triple TTS Setup
+- 3 GPUs (GPU 0 + GPU 1 + GPU 2)
+- 3 TTS services (18182 for GPU 0, 18183 for GPU 1, 18184 for GPU 2)
 - Port 5003
 - Proper queue management
 """
@@ -82,8 +82,12 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
     # Determine which TTS container based on port
     if tts_port == 18182:
         tts_ref_dir = os.path.expanduser("~/heygem_data/tts0/reference")
-    else:  # 18183
+    elif tts_port == 18183:
         tts_ref_dir = os.path.expanduser("~/heygem_data/tts1/reference")
+    elif tts_port == 18184:
+        tts_ref_dir = os.path.expanduser("~/heygem_data/tts2/reference")
+    else:
+        raise ValueError(f"Unknown TTS port: {tts_port}")
     
     os.makedirs(tts_ref_dir, exist_ok=True)
     
@@ -188,12 +192,13 @@ def serve_output(filename):
 def api_info():
     """API information"""
     return jsonify({
-        "service": "Dual GPU + Dual TTS Video Generation",
+        "service": "Triple GPU + Triple TTS Video Generation",
         "version": "1.0.0",
         "port": 5003,
         "gpus": {
-            "0": {"video_port": 8390, "tts_port": 18180},
-            "1": {"video_port": 8391, "tts_port": 18181}
+            "0": {"video_port": 8390, "tts_port": 18182},
+            "1": {"video_port": 8391, "tts_port": 18183},
+            "2": {"video_port": 8392, "tts_port": 18184}
         },
         "endpoints": ["/api/generate", "/api/status", "/api/queue", "/api/download"]
     })
@@ -511,12 +516,13 @@ def health():
 
 if __name__ == '__main__':
     print("\n" + "="*80)
-    print("🚀 Dual GPU + Dual TTS Video Generation API Server")
+    print("🚀 Triple GPU + Triple TTS Video Generation API Server")
     print("="*80)
     print("📍 Running on: http://0.0.0.0:5003")
     print("🎬 GPU Configuration:")
     print("   - GPU 0: Video Port 8390, TTS Port 18182 (heygem-tts-dual-0)")
     print("   - GPU 1: Video Port 8391, TTS Port 18183 (heygem-tts-dual-1)")
+    print("   - GPU 2: Video Port 8392, TTS Port 18184 (heygem-tts-dual-2)")
     print("🎤 Dedicated TTS per GPU - No bottleneck!")
     print("="*80 + "\n")
     
