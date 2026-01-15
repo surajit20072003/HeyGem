@@ -16,6 +16,14 @@ from datetime import datetime
 from queue import Queue
 from typing import Dict, Optional
 
+# Vimeo Integration
+try:
+    from vimeo_api import VimeoUploader
+    VIMEO_AVAILABLE = True
+except ImportError:
+    VIMEO_AVAILABLE = False
+    print("⚠️  Vimeo module not available")
+
 
 class DualGPUScheduler:
     def __init__(self):
@@ -405,12 +413,16 @@ class DualGPUScheduler:
                                 video_time = time.time() - self.active_tasks[task_id]["video_start_time"]
                                 print(f"   ⏱️  Video generation time: {video_time:.2f}s")
                         
+                        
                         with self.lock:
                             self.active_tasks[task_id]["status"] = "completed"
                             self.active_tasks[task_id]["result"] = result
                             self.active_tasks[task_id]["completed_time"] = datetime.now()
                             if video_time is not None:
                                 self.active_tasks[task_id]["video_time"] = video_time
+                        
+                        # Auto-upload to Vimeo (if enabled)
+                        self.upload_to_vimeo(task_id, dest_path)
                         
                         # Release GPU and process next task
                         self.release_gpu(gpu_id, task_id)
@@ -531,28 +543,27 @@ class DualGPUScheduler:
             print("📭 Queue is empty")
             return
         
-        # Check for available GPU and reserve it atomically
+        # CRITICAL: Find GPU and reserve it atomically to prevent race conditions
         gpu_id = None
+        task_data = None
+        
         with self.lock:
+            # First check if any GPU is available
             for gid in [0, 1, 2]:  # Check all 3 GPUs
                 if not self.gpu_config[gid]["busy"]:
                     gpu_id = gid
                     break
-        
-        if gpu_id is None:
-            print("⏸️ No GPUs available, tasks remain in queue")
-            return
-        
-        # Get next task
-        task_data = self.task_queue.get()
-        task_id = task_data["task_id"]
-        
-        print(f"\n🎬 Processing queued task: {task_id}")
-        print(f"   Will assign to GPU {gpu_id}")
-        print(f"   Queue size remaining: {self.task_queue.qsize()}")
-        
-        # Reserve the GPU for this task
-        with self.lock:
+            
+            # If no GPU available, leave task in queue
+            if gpu_id is None:
+                print("⏸️ No GPUs available, tasks remain in queue")
+                return
+            
+            # GPU found - now get task from queue and reserve GPU atomically
+            task_data = self.task_queue.get()
+            task_id = task_data["task_id"]
+            
+            # Reserve the GPU for this task (atomic with check)
             self.gpu_config[gpu_id]["busy"] = True
             self.gpu_config[gpu_id]["current_task"] = task_id
             
@@ -561,6 +572,10 @@ class DualGPUScheduler:
                 self.active_tasks[task_id]["status"] = "reserved"
                 self.active_tasks[task_id]["gpu_id"] = gpu_id
         
+        # Now outside lock - print and process
+        print(f"\n🎬 Processing queued task: {task_id}")
+        print(f"   Assigned to GPU {gpu_id}")
+        print(f"   Queue size remaining: {self.task_queue.qsize()}")
         print(f"🔒 [GPU {gpu_id}] Reserved for queued task {task_id}")
         
         # If callback provided, use it to handle TTS generation
@@ -635,7 +650,11 @@ class DualGPUScheduler:
                     "tts_time": task.get("tts_time"),  # Voice generation time
                     "video_time": task.get("video_time"),  # Video processing time
                     "total_time": total_time  # Total time from start to completion
-                }
+                },
+                # Vimeo upload status
+                "vimeo_uploaded": task.get("vimeo_uploaded", False),
+                "vimeo_upload_time": task.get("vimeo_upload_time").isoformat() if task.get("vimeo_upload_time") else None,
+                "vimeo_url": task.get("vimeo_url")
             }
 
     def _get_queue_position(self, task_id: str) -> Optional[int]:
@@ -656,6 +675,71 @@ class DualGPUScheduler:
         with self.lock:
             if task_id in self.preprocessing_tasks:
                 del self.preprocessing_tasks[task_id]
+
+    def upload_to_vimeo(self, task_id: str, video_path: str):
+        """
+        Auto-upload completed video to Vimeo (if enabled)
+        """
+        if not VIMEO_AVAILABLE:
+            print(f"   ⏭️  Vimeo upload skipped - module not available")
+            return
+        
+        # Load Vimeo config
+        config_path = os.path.join(os.path.dirname(__file__), "vimeo_config.json")
+        
+        if not os.path.exists(config_path):
+            print(f"   ⏭️  Vimeo upload skipped - config not found")
+            return
+        
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"   ⚠️  Failed to load Vimeo config: {e}")
+            return
+        
+        if not config.get("enabled", False):
+            print(f"   ⏭️  Vimeo upload disabled in config")
+            return
+        
+        # Prepare metadata
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        title = config.get("name_template", "{task_id}").format(
+            task_id=task_id,
+            date=date_str
+        )
+        description = config.get("description_template", "").format(
+            task_id=task_id,
+            date=date_str
+        )
+        
+        print(f"\n📤 [Vimeo] Uploading {task_id}...")
+        print(f"   File: {video_path}")
+        print(f"   Title: {title}")
+        
+        try:
+            uploader = VimeoUploader(config)
+            uri = uploader.upload_video(video_path, title, description)
+            
+            if uri:
+                # Convert URI to full URL
+                vimeo_url = f"https://vimeo.com{uri.replace('/videos/', '/')}"
+                
+                with self.lock:
+                    if task_id in self.active_tasks:
+                        self.active_tasks[task_id]["vimeo_uploaded"] = True
+                        self.active_tasks[task_id]["vimeo_upload_time"] = datetime.now()
+                        self.active_tasks[task_id]["vimeo_uri"] = uri
+                        self.active_tasks[task_id]["vimeo_url"] = vimeo_url
+                
+                print(f"   ✅ Vimeo upload successful!")
+                print(f"   🔗 Link: {vimeo_url}")
+            else:
+                print(f"   ⚠️  Vimeo upload failed for {task_id}")
+                
+        except Exception as e:
+            print(f"   ❌ Vimeo upload error: {e}")
+            # Don't block task completion on upload failure
 
 
 # Global scheduler instance

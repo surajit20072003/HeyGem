@@ -412,8 +412,9 @@ def generate_video():
         if not text:
             return jsonify({"error": "No text provided"}), 400
         
-        # Generate task_id
-        task_id = f"task_{int(time.time())}"
+        # Generate task_id with UUID for uniqueness (prevents duplicates in parallel requests)
+        import uuid
+        task_id = f"task_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         
         # Check if video file is present (optional now)
         video_path = None
@@ -514,12 +515,13 @@ def health():
 
 if __name__ == '__main__':
     print("\n" + "="*80)
-    print("🚀 Dual GPU + Dual TTS Video Generation API Server")
+    print("🚀 Triple GPU + Triple TTS Video Generation API Server")
     print("="*80)
     print("📍 Running on: http://0.0.0.0:5003")
     print("🎬 GPU Configuration:")
     print("   - GPU 0: Video Port 8390, TTS Port 18182 (heygem-tts-dual-0)")
     print("   - GPU 1: Video Port 8391, TTS Port 18183 (heygem-tts-dual-1)")
+    print("   - GPU 2: Video Port 8392, TTS Port 18184 (heygem-tts-dual-2)")
     print("🎤 Dedicated TTS per GPU - No bottleneck!")
     print("="*80 + "\n")
     

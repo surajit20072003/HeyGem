@@ -505,6 +505,78 @@
                                     </a>
                                 </div>
                             `;
+
+                            // Show Vimeo upload status (MAIN SECTION)
+                            if (data.vimeo_uploaded) {
+                                resultDiv.innerHTML += `
+                                    <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                                        <p style="margin: 0 0 10px 0;">
+                                            📤 <strong style="color: #2e7d32;">Vimeo Upload:</strong> 
+                                            <span style="color: #4caf50;">✅ Uploaded Successfully</span>
+                                        </p>
+                                        ${data.vimeo_url ? `
+                                            <a href="${data.vimeo_url}" target="_blank" style="
+                                                display: inline-block;
+                                                padding: 8px 16px;
+                                                background: #1976d2;
+                                                color: white;
+                                                text-decoration: none;
+                                                border-radius: 6px;
+                                                font-size: 14px;
+                                                margin-top: 5px;
+                                            ">
+                                                🎬 View on Vimeo
+                                            </a>
+                                        ` : ''}
+                                        ${data.vimeo_upload_time ? `<br><small style="color: #666; margin-top: 10px; display: block;">Uploaded: ${new Date(data.vimeo_upload_time).toLocaleString()}</small>` : ''}
+                                    </div>
+                                `;
+                            } else if (data.status === 'completed') {
+                                resultDiv.innerHTML += `
+                                    <div style="background: #fff3e0; padding: 10px; border-radius: 8px; margin-top: 10px;">
+                                        <p style="margin: 0;">
+                                            📤 <strong>Vimeo Upload:</strong> 
+                                            <span style="color: #f57c00;">⏭️ Not uploaded (disabled or failed)</span>
+                                        </p>
+                                    </div>
+                                `;
+                            }
+
+                            // Show Vimeo upload status
+                            if (data.vimeo_uploaded) {
+                                resultDiv.innerHTML += `
+                                    <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                                        <p style="margin: 0 0 10px 0;">
+                                            📤 <strong style="color: #2e7d32;">Vimeo Upload:</strong> 
+                                            <span style="color: #4caf50;">✅ Uploaded Successfully</span>
+                                        </p>
+                                        ${data.vimeo_url ? `
+                                            <a href="${data.vimeo_url}" target="_blank" style="
+                                                display: inline-block;
+                                                padding: 8px 16px;
+                                                background: #1976d2;
+                                                color: white;
+                                                text-decoration: none;
+                                                border-radius: 6px;
+                                                font-size: 14px;
+                                                margin-top: 5px;
+                                            ">
+                                                🎬 View on Vimeo
+                                            </a>
+                                        ` : ''}
+                                        ${data.vimeo_upload_time ? `<br><small style="color: #666; margin-top: 10px; display: block;">Uploaded: ${new Date(data.vimeo_upload_time).toLocaleString()}</small>` : ''}
+                                    </div>
+                                `;
+                            } else if (data.status === 'completed') { // This condition is redundant as we are already inside data.status === 'completed'
+                                resultDiv.innerHTML += `
+                                    <div style="background: #fff3e0; padding: 10px; border-radius: 8px; margin-top: 10px;">
+                                        <p style="margin: 0;">
+                                            📤 <strong>Vimeo Upload:</strong> 
+                                            <span style="color: #f57c00;">⏭️ Not uploaded (disabled or failed)</span>
+                                        </p>
+                                    </div>
+                                `;
+                            }
                         } else {
                             resultDiv.innerHTML += '<p>✅ Task completed, but video URL not found.</p>';
                         }
