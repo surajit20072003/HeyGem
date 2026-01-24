@@ -1,0 +1,6 @@
+chatterbox-tts
+flask
+flask-cors
+requests
+torch
+torchaudio

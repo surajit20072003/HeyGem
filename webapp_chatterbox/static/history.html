@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task History - Chatterbox TTS</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-card h3 {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        tbody tr:hover {
+            background: #f8f9ff;
+        }
+
+        td {
+            padding: 15px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-completed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-processing {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-timeout {
+            background: #f5c6cb;
+            color: #721c24;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .modal-content {
+            background: white;
+            max-width: 800px;
+            margin: 50px auto;
+            border-radius: 15px;
+            padding: 30px;
+            position: relative;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 30px;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .detail-section {
+            margin-bottom: 25px;
+        }
+
+        .detail-section h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .detail-row {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .detail-value {
+            color: #333;
+            word-break: break-word;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            margin-top: 10px;
+            transition: transform 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: white;
+            font-size: 18px;
+        }
+
+        .nav-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <a href="/" class="nav-link">← Back to Generator</a>
+
+        <div class="header">
+            <h1>📊 Task History</h1>
+            <p>View all video generation tasks and their details</p>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Total Tasks</h3>
+                <div class="value" id="total-tasks">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Completed</h3>
+                <div class="value" id="completed-tasks" style="color: #28a745;">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Failed</h3>
+                <div class="value" id="failed-tasks" style="color: #dc3545;">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Processing</h3>
+                <div class="value" id="processing-tasks" style="color: #ffc107;">0</div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Task ID</th>
+                        <th>Status</th>
+                        <th>GPU</th>
+                        <th>Start Time</th>
+                        <th>Duration</th>
+                        <th>Text Preview</th>
+                    </tr>
+                </thead>
+                <tbody id="task-table-body">
+                    <tr>
+                        <td colspan="6" class="loading">Loading tasks...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal for task details -->
+    <div id="task-modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <script>
+        let allTasks = [];
+
+        async function loadTasks() {
+            try {
+                const response = await fetch('/api/history');
+                const data = await response.json();
+                allTasks = data.tasks;
+
+                updateStats(data.tasks);
+                renderTable(data.tasks);
+            } catch (error) {
+                console.error('Error loading tasks:', error);
+                document.getElementById('task-table-body').innerHTML =
+                    '<tr><td colspan="6" style="text-align:center; color:red;">Error loading tasks</td></tr>';
+            }
+        }
+
+        function updateStats(tasks) {
+            const stats = {
+                total: tasks.length,
+                completed: tasks.filter(t => t.status === 'completed').length,
+                failed: tasks.filter(t => t.status === 'failed' || t.status === 'timeout').length,
+                processing: tasks.filter(t => t.status === 'processing').length
+            };
+
+            document.getElementById('total-tasks').textContent = stats.total;
+            document.getElementById('completed-tasks').textContent = stats.completed;
+            document.getElementById('failed-tasks').textContent = stats.failed;
+            document.getElementById('processing-tasks').textContent = stats.processing;
+        }
+
+        function renderTable(tasks) {
+            const tbody = document.getElementById('task-table-body');
+
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No tasks found</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = tasks.map(task => {
+                const duration = calculateDuration(task);
+                const statusClass = `status-${task.status}`;
+
+                return `
+                    <tr onclick="showTaskDetails('${task.task_id}')">
+                        <td><code>${task.task_id}</code></td>
+                        <td><span class="status-badge ${statusClass}">${task.status.toUpperCase()}</span></td>
+                        <td>GPU ${task.gpu_id !== null ? task.gpu_id : 'N/A'}</td>
+                        <td>${formatDate(task.start_time)}</td>
+                        <td>${duration}</td>
+                        <td>${task.input_text ? task.input_text.substring(0, 50) + '...' : 'N/A'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function calculateDuration(task) {
+            if (task.timing && task.timing.total_time) {
+                return `${task.timing.total_time.toFixed(1)}s`;
+            }
+            if (task.start_time && task.completed_time) {
+                const start = new Date(task.start_time);
+                const end = new Date(task.completed_time);
+                const diff = (end - start) / 1000;
+                return `${diff.toFixed(1)}s`;
+            }
+            return 'N/A';
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            const date = new Date(dateStr);
+            return date.toLocaleString();
+        }
+
+        function showTaskDetails(taskId) {
+            const task = allTasks.find(t => t.task_id === taskId);
+            if (!task) return;
+
+            const modalBody = document.getElementById('modal-body');
+            const statusClass = `status-${task.status}`;
+
+            modalBody.innerHTML = `
+                <h2>Task Details</h2>
+                
+                <div class="detail-section">
+                    <h3>Basic Information</h3>
+                    <div class="detail-row">
+                        <div class="detail-label">Task ID:</div>
+                        <div class="detail-value"><code>${task.task_id}</code></div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Status:</div>
+                        <div class="detail-value"><span class="status-badge ${statusClass}">${task.status.toUpperCase()}</span></div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">GPU:</div>
+                        <div class="detail-value">GPU ${task.gpu_id !== null ? task.gpu_id : 'N/A'}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Progress:</div>
+                        <div class="detail-value">${task.progress}%</div>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h3>Timing</h3>
+                    <div class="detail-row">
+                        <div class="detail-label">Start Time:</div>
+                        <div class="detail-value">${formatDate(task.start_time)}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Completed Time:</div>
+                        <div class="detail-value">${formatDate(task.completed_time)}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Audio Duration:</div>
+                        <div class="detail-value">${task.audio_duration ? task.audio_duration.toFixed(2) + 's' : 'N/A'}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">TTS Time:</div>
+                        <div class="detail-value">${task.timing.tts_time ? task.timing.tts_time.toFixed(2) + 's' : 'N/A'}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Video Time:</div>
+                        <div class="detail-value">${task.timing.video_time ? task.timing.video_time.toFixed(2) + 's' : 'N/A'}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Total Time:</div>
+                        <div class="detail-value">${task.timing.total_time ? task.timing.total_time.toFixed(2) + 's' : 'N/A'}</div>
+                    </div>
+                </div>
+
+                ${task.error ? `
+                <div class="detail-section">
+                    <h3>Error</h3>
+                    <div class="detail-value" style="color: #dc3545; padding: 15px; background: #f8d7da; border-radius: 8px;">
+                        ${task.error}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="detail-section">
+                    <h3>Input Text</h3>
+                    <div class="detail-value" style="padding: 15px; background: #f8f9fa; border-radius: 8px; max-height: 200px; overflow-y: auto;">
+                        ${task.input_text || 'N/A'}
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h3>Results</h3>
+                    ${task.generated_audio_url ? `<a href="${task.generated_audio_url}" class="btn" target="_blank">🎵 Download Audio</a>` : ''}
+                    ${task.result_url ? `<a href="${task.result_url}" class="btn" target="_blank">🎬 Download Video</a>` : ''}
+                    ${task.vimeo_url ? `<a href="${task.vimeo_url}" class="btn" target="_blank">📺 View on Vimeo</a>` : ''}
+                    ${!task.generated_audio_url && !task.result_url && !task.vimeo_url ? '<p style="color: #999;">No results available</p>' : ''}
+                </div>
+            `;
+
+            document.getElementById('task-modal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('task-modal').style.display = 'none';
+        }
+
+        // Close modal on outside click
+        window.onclick = function (event) {
+            const modal = document.getElementById('task-modal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        // Load tasks on page load
+        loadTasks();
+
+        // Auto-refresh every 10 seconds
+        setInterval(loadTasks, 10000);
+    </script>
+</body>
+
+</html>

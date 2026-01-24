@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Triple GPU Scheduler with Dedicated TTS Containers
-- GPU 0 (Port 8390) → TTS 0 (Port 18182)
-- GPU 1 (Port 8391) → TTS 1 (Port 18183)
-- GPU 2 (Port 8392) → TTS 2 (Port 18184)
+Triple GPU Scheduler with Chatterbox TTS Services
+- GPU 0 (Port 8390) → Chatterbox TTS 0 (Port 20182)
+- GPU 1 (Port 8391) → Chatterbox TTS 1 (Port 20183)
+- GPU 2 (Port 8392) → Chatterbox TTS 2 (Port 20184)
 - Proper queue management
 """
 import requests
@@ -25,25 +25,25 @@ except ImportError:
     print("⚠️  Vimeo module not available")
 
 
-class DualGPUScheduler:
+class ChatterboxScheduler:
     def __init__(self):
-        # 3 GPUs with dedicated TTS services
+        # 3 GPUs with dedicated Chatterbox TTS services
         self.gpu_config = {
             0: {
                 "port": 8390,
-                "tts_port": 18182,  # Dedicated TTS for GPU 0 (heygem-tts-dual-0)
+                "tts_port": 20182,  # Chatterbox TTS for GPU 0
                 "busy": False,
                 "current_task": None
             },
             1: {
                 "port": 8391,
-                "tts_port": 18183,  # Dedicated TTS for GPU 1 (heygem-tts-dual-1)
+                "tts_port": 20183,  # Chatterbox TTS for GPU 1
                 "busy": False,
                 "current_task": None
             },
             2: {
                 "port": 8392,
-                "tts_port": 18184,  # Dedicated TTS for GPU 2 (heygem-tts-dual-2)
+                "tts_port": 20184,  # Chatterbox TTS for GPU 2
                 "busy": False,
                 "current_task": None
             }
@@ -54,13 +54,56 @@ class DualGPUScheduler:
         self.active_tasks = {}  # task_id -> {status, gpu_id, progress, ...}
         self.preprocessing_tasks = {}  # Tasks in audio extraction/TTS phase
         
+        # Persistent storage
+        self.history_file = os.path.join(os.path.dirname(__file__), 'task_history.json')
+        self._load_history()
+        
         # Threading
         self.lock = threading.Lock()
         
-        print("🚀 Triple GPU Scheduler Initialized")
-        print(f"   GPU 0: Video Port {self.gpu_config[0]['port']}, TTS Port {self.gpu_config[0]['tts_port']} (heygem-tts-dual-0)")
-        print(f"   GPU 1: Video Port {self.gpu_config[1]['port']}, TTS Port {self.gpu_config[1]['tts_port']} (heygem-tts-dual-1)")
-        print(f"   GPU 2: Video Port {self.gpu_config[2]['port']}, TTS Port {self.gpu_config[2]['tts_port']} (heygem-tts-dual-2)")
+        print("🚀 Triple GPU Scheduler with Chatterbox TTS Initialized")
+        print(f"   GPU 0: Video Port {self.gpu_config[0]['port']}, Chatterbox TTS Port {self.gpu_config[0]['tts_port']}")
+        print(f"   GPU 1: Video Port {self.gpu_config[1]['port']}, Chatterbox TTS Port {self.gpu_config[1]['tts_port']}")
+        print(f"   GPU 2: Video Port {self.gpu_config[2]['port']}, Chatterbox TTS Port {self.gpu_config[2]['tts_port']}")
+        print(f"   📁 Task history: {self.history_file}")
+
+    def _load_history(self):
+        """Load task history from JSON file"""
+        try:
+            if os.path.exists(self.history_file):
+                with open(self.history_file, 'r') as f:
+                    data = json.load(f)
+                    # Convert datetime strings back to datetime objects
+                    for task_id, task_data in data.items():
+                        if task_data.get('start_time'):
+                            task_data['start_time'] = datetime.fromisoformat(task_data['start_time'])
+                        if task_data.get('completed_time'):
+                            task_data['completed_time'] = datetime.fromisoformat(task_data['completed_time'])
+                    self.active_tasks = data
+                    print(f"   ✅ Loaded {len(data)} tasks from history")
+            else:
+                print("   📝 No existing history file, starting fresh")
+        except Exception as e:
+            print(f"   ⚠️  Error loading history: {e}")
+            self.active_tasks = {}
+
+    def _save_history(self):
+        """Save task history to JSON file"""
+        try:
+            # Convert datetime objects to strings for JSON serialization
+            serializable_tasks = {}
+            for task_id, task_data in self.active_tasks.items():
+                task_copy = task_data.copy()
+                if task_copy.get('start_time') and isinstance(task_copy['start_time'], datetime):
+                    task_copy['start_time'] = task_copy['start_time'].isoformat()
+                if task_copy.get('completed_time') and isinstance(task_copy['completed_time'], datetime):
+                    task_copy['completed_time'] = task_copy['completed_time'].isoformat()
+                serializable_tasks[task_id] = task_copy
+            
+            with open(self.history_file, 'w') as f:
+                json.dump(serializable_tasks, f, indent=2)
+        except Exception as e:
+            print(f"   ⚠️  Error saving history: {e}")
 
     def get_gpu_memory(self, gpu_id: int) -> str:
         """Get current GPU memory usage via nvidia-smi"""
@@ -248,10 +291,109 @@ class DualGPUScheduler:
             return False
 
 
+    
+    def check_and_handle_completion(self, task_id: str, gpu_id: int, result: dict) -> bool:
+        """
+        Check if output file exists and handle completion.
+        Returns True if task was completed/found, False otherwise.
+        """
+        # Handle Result File
+        container_result_path = result.get('data', {}).get('result', '')
+        
+        # Strip /code/data/ prefix
+        if container_result_path.startswith('/code/data/'):
+            rel_path = container_result_path[len('/code/data/'):]
+        elif container_result_path.startswith('/'):
+            rel_path = container_result_path[1:]
+        else:
+            rel_path = container_result_path
+            
+        # Source path in shared volume
+        host_shared_dir = os.path.expanduser(f"~/heygem_data/gpu{gpu_id}")
+        source_path = os.path.join(host_shared_dir, rel_path) if rel_path else ""
+        
+        # Destination path in webapp outputs
+        output_filename = f"final_{task_id}.mp4"
+        dest_path = os.path.join(os.getcwd(), 'outputs', output_filename)
+        
+        final_url = ""
+        found = False
+        
+        # 1. Try explicit path from result
+        if source_path and os.path.exists(source_path):
+            found = True
+        else:
+            # 2. Try inferred paths
+            if task_id.startswith("task_"):
+                expected_filename = f"{task_id}-r.mp4"
+            else:
+                expected_filename = f"task_{task_id}-r.mp4"
+                
+            candidates = [
+                os.path.join(host_shared_dir, "temp", expected_filename),
+                os.path.join(host_shared_dir, expected_filename)
+            ]
+            
+            for p in candidates:
+                if os.path.exists(p):
+                    source_path = p
+                    found = True
+                    print(f"   [DEBUG] Found strict match: {source_path}")
+                    break
+        
+        if found:
+            # Wait for file stability (as before)
+            try:
+                prev_size = 0
+                stable_count = 0
+                while stable_count < 3:
+                    time.sleep(1)
+                    if not os.path.exists(source_path): break
+                    current_size = os.path.getsize(source_path)
+                    if current_size == prev_size and current_size > 10000:
+                        stable_count += 1
+                    else:
+                        stable_count = 0
+                        prev_size = current_size
+                
+                shutil.copy2(source_path, dest_path)
+                print(f"   💾 Saved output to: {dest_path}")
+                final_url = f"/outputs/{output_filename}"
+                
+                # Update Result Payload
+                if result.get('data') is None: result['data'] = {}
+                result['data']['result_url'] = final_url
+                
+                # Clean up stats
+                video_time = None
+                with self.lock:
+                    if task_id in self.active_tasks and "video_start_time" in self.active_tasks[task_id]:
+                        video_time = time.time() - self.active_tasks[task_id]["video_start_time"]
+                
+                with self.lock:
+                    self.active_tasks[task_id]["status"] = "completed"
+                    self.active_tasks[task_id]["result"] = result
+                    self.active_tasks[task_id]["completed_time"] = datetime.now()
+                    if video_time is not None:
+                        self.active_tasks[task_id]["video_time"] = video_time
+                    self._save_history()  # Persist to file
+                        
+                # Auto-upload
+                self.upload_to_vimeo(task_id, dest_path)
+                
+                self.release_gpu(gpu_id, task_id)
+                return True
+                
+            except Exception as e:
+                print(f"   ⚠️ Error handling completion file: {e}")
+                return False
+                
+        return False
+
     def monitor_task(self, task_id: str, gpu_id: int, video_path: str, audio_path: str):
         """Monitor task until completion with timeout and failure detection"""
         port = self.gpu_config[gpu_id]["port"]
-        max_wait = 1800  # 30 minutes timeout
+        max_wait = 5000  # 60 minutes timeout (increased for long videos)
         check_interval = 5
         elapsed = 0
         consecutive_errors = 0
@@ -285,6 +427,22 @@ class DualGPUScheduler:
                         if result.get('code') == 0 and result.get('msg') == 'success':
                             # Sometimes success without data might mean queued or processing
                             pass
+                        elif result.get('code') == 10004 or '任务不存在' in result.get('msg', ''):
+                            # Task not found in container - check if we missed the completion
+                            print(f"   ⚠️ [GPU {gpu_id}] Container says 'Task Not Found' (Code 10004)")
+                            
+                            # Check if output file exists (Success case)
+                            if self.check_and_handle_completion(task_id, gpu_id, result):
+                                return
+                            
+                            # If no output file, it failed/vanished
+                            print(f"   ❌ [GPU {gpu_id}] Task {task_id} vanished from container without results")
+                            with self.lock:
+                                self.active_tasks[task_id]["status"] = "failed"
+                                self.active_tasks[task_id]["error"] = "Task vanished from GPU container (likely crashed or OOM)"
+                                self._save_history()
+                            self.release_gpu(gpu_id, task_id)
+                            return
                             
                     # Update task status
                     with self.lock:
@@ -386,6 +544,7 @@ class DualGPUScheduler:
                                 with self.lock:
                                     self.active_tasks[task_id]["status"] = "failed"
                                     self.active_tasks[task_id]["error"] = f"Output file too small: {current_size} bytes"
+                                    self._save_history()
                                 self.release_gpu(gpu_id, task_id)
                                 return
                             
@@ -454,6 +613,7 @@ class DualGPUScheduler:
                 with self.lock:
                     self.active_tasks[task_id]["status"] = "failed"
                     self.active_tasks[task_id]["error"] = "Too many consecutive monitoring errors"
+                    self._save_history()
                 
                 # Release GPU and process next task
                 self.release_gpu(gpu_id, task_id)
@@ -468,6 +628,7 @@ class DualGPUScheduler:
         with self.lock:
             self.active_tasks[task_id]["status"] = "timeout"
             self.active_tasks[task_id]["error"] = f"Timeout after {max_wait} seconds"
+            self._save_history()  # Persist to file
         
         # Release GPU and process next task
         self.release_gpu(gpu_id, task_id)
@@ -646,6 +807,7 @@ class DualGPUScheduler:
                 "input_text": task.get("input_text"),  # Original text input
                 "reference_audio": task.get("reference_audio"),  # Reference audio path
                 "generated_audio_url": generated_audio_url,  # Generated TTS audio URL
+                "audio_duration": task.get("audio_duration", 0),  # Audio duration in seconds
                 "timing": {
                     "tts_time": task.get("tts_time"),  # Voice generation time
                     "video_time": task.get("video_time"),  # Video processing time
@@ -743,12 +905,13 @@ class DualGPUScheduler:
 
 
 # Global scheduler instance
-scheduler = DualGPUScheduler()
+scheduler = ChatterboxScheduler()
 
 
 if __name__ == "__main__":
-    print("🚀 Dual GPU Scheduler with Dedicated TTS Services")
+    print("🚀 Triple GPU Scheduler with Chatterbox TTS Services")
     print("=" * 80)
-    print("GPU 0 (Port 8390) → TTS (Port 18182) [heygem-tts-dual-0]")
-    print("GPU 1 (Port 8391) → TTS (Port 18183) [heygem-tts-dual-1]")
+    print("GPU 0 (Port 8390) → Chatterbox TTS (Port 20182)")
+    print("GPU 1 (Port 8391) → Chatterbox TTS (Port 20183)")
+    print("GPU 2 (Port 8392) → Chatterbox TTS (Port 20184)")
     print("=" * 80)

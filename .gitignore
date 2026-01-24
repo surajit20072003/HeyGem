@@ -62,3 +62,7 @@ webapp_chunked/manual_chunk01.mp4
 
 # IDE
 .vscode/
+
+# Chatterbox specific
+webapp_chatterbox/chatterbox_venv/
+resources/ffmpeg/

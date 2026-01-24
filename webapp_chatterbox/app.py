@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Flask API Server for Triple GPU + Triple TTS Setup
+Flask API Server for Triple GPU + Chatterbox TTS Setup
 - 3 GPUs (GPU 0 + GPU 1 + GPU 2)
-- 3 TTS services (18182 for GPU 0, 18183 for GPU 1, 18184 for GPU 2)
-- Port 5003
+- 3 Chatterbox TTS services (20182 for GPU 0, 20183 for GPU 1, 20184 for GPU 2)
+- Port 5004
 - Proper queue management
 """
 from flask import Flask, request, jsonify, send_file, send_from_directory
@@ -14,7 +14,7 @@ import time
 import threading
 from datetime import datetime
 from text_normalization import latex_to_speech
-from dual_gpu_scheduler import scheduler
+from chatterbox_scheduler import scheduler
 
 app = Flask(__name__)
 CORS(app)
@@ -23,9 +23,9 @@ CORS(app)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_VIDEO_PATH = os.path.join(BASE_DIR, 'default.mp4')
 DEFAULT_REFERENCE_AUDIO = os.path.join(BASE_DIR, 'reference_audio.wav')
-UPLOAD_FOLDER = './uploads'
-OUTPUT_FOLDER = './outputs'
-TEMP_FOLDER = './temp'
+UPLOAD_FOLDER = os.path.abspath('./uploads')
+OUTPUT_FOLDER = os.path.abspath('./outputs')
+TEMP_FOLDER = os.path.abspath('./temp')
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -78,36 +78,14 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
     text = latex_to_speech(text)
     print(f"   📐 Normalizing Text (After):  {text[:50]}...")
     
-    # Copy reference audio to TTS data directory (shared volume)
-    # Determine which TTS container based on port
-    if tts_port == 18182:
-        tts_ref_dir = os.path.expanduser("~/heygem_data/tts0/reference")
-    elif tts_port == 18183:
-        tts_ref_dir = os.path.expanduser("~/heygem_data/tts1/reference")
-    else:  # 18184
-        tts_ref_dir = os.path.expanduser("~/heygem_data/tts2/reference")
+    # Chatterbox uses direct file paths (no Docker volume mapping)
+    # Simply pass the reference audio path directly
+    print(f"   📁 Using reference audio: {reference_audio}")
     
-    os.makedirs(tts_ref_dir, exist_ok=True)
-    
-    # FIX: Use unique filename with task_id to prevent race condition
-    # Instead of: ref_filename = os.path.basename(reference_audio)
-    # This prevents concurrent tasks from overwriting each other's reference audio
-    if task_id:
-        ref_filename = f"ref_{task_id}_{int(time.time())}.wav"
-    else:
-        # Fallback if task_id not provided
-        ref_filename = f"ref_{int(time.time())}_{os.getpid()}.wav"
-    
-    tts_ref_path = os.path.join(tts_ref_dir, ref_filename)
-    subprocess.run(['cp', reference_audio, tts_ref_path])
-    
-    print(f"   📁 Copied reference audio to: {tts_ref_path}")
-    
-    # TTS API call - use invoke directly (no preprocessing needed)
+    # Chatterbox TTS API call
     payload = {
         "text": text,
-        "reference_audio": f"/code/data/reference/{ref_filename}",
-        "reference_text": "",
+        "reference_audio": reference_audio,  # Direct file path
         "format": "wav"
     }
     
@@ -153,11 +131,25 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
         print(f"   Audio duration: {duration:.2f}s")
         print(f"   ⏱️  TTS generation time: {tts_time:.2f}s")
         
+        # UNLOAD MODEL TO FREE GPU MEMORY
+        try:
+            print(f"   🧹 Unloading TTS model from port {tts_port}...")
+            requests.post(f"{TTS_API}/v1/unload", timeout=10)
+        except Exception as e:
+            print(f"   ⚠️  Failed to unload model: {e}")
+        
         return output_audio, duration, tts_time
         
     except Exception as e:
         print(f"   ❌ TTS generation error: {e}")
         print(f"   ⚠️  FALLBACK: Using reference audio due to exception")
+        
+        # Still try to unload model in case of error
+        try:
+            requests.post(f"{TTS_API}/v1/unload", timeout=10)
+        except:
+            pass
+            
         print(f"   ⚠️  Reference audio path: {reference_audio}")
         return reference_audio, 0, 0
 
@@ -190,14 +182,21 @@ def serve_output(filename):
 def api_info():
     """API information"""
     return jsonify({
-        "service": "Triple GPU + Triple TTS Video Generation",
+        "service": "Triple GPU + Chatterbox TTS Video Generation",
+        "tts_engine": "Chatterbox-Turbo (Resemble AI)",
         "version": "1.0.0",
-        "port": 5003,
+        "port": 5004,
         "gpus": {
-            "0": {"video_port": 8390, "tts_port": 18182},
-            "1": {"video_port": 8391, "tts_port": 18183},
-            "2": {"video_port": 8392, "tts_port": 18184}
+            "0": {"video_port": 8390, "tts_port": 20182},
+            "1": {"video_port": 8391, "tts_port": 20183},
+            "2": {"video_port": 8392, "tts_port": 20184}
         },
+        "features": [
+            "Zero-shot voice cloning",
+            "Multilingual support (23 languages)",
+            "Paralinguistic tags ([laugh], [cough], [chuckle])",
+            "Ultra-low latency (~200ms)"
+        ],
         "endpoints": ["/api/generate", "/api/status", "/api/queue", "/api/download"]
     })
 
@@ -273,6 +272,7 @@ def process_task_background(task_id, text, video_path):
                 scheduler.active_tasks[task_id]["input_text"] = text
                 scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
                 scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                scheduler.active_tasks[task_id]["audio_duration"] = duration
         
         # Step 4: Clear preprocessing status
         scheduler.clear_preprocessing_status(task_id)
@@ -354,6 +354,7 @@ def process_queued_task_with_tts(task_data, gpu_id):
                 scheduler.active_tasks[task_id]["input_text"] = text
                 scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
                 scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                scheduler.active_tasks[task_id]["audio_duration"] = duration
         
         # Submit to the reserved GPU
         print(f"\n📤 [Queued Task {task_id}] Submitting to GPU {gpu_id}...")
@@ -482,6 +483,17 @@ def download_video(task_id):
         return jsonify({"error": "Video not found"}), 404
 
 
+@app.route('/api/download/audio/<task_id>')
+def download_audio(task_id):
+    """Download generated audio"""
+    filename = f"tts_{task_id}.wav"
+    file_path = os.path.join(TEMP_FOLDER, filename)
+    
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True)
+    return jsonify({"error": "Audio file not found"}), 404
+
+
 @app.route('/api/queue')
 def get_queue():
     """Get current task queue status"""
@@ -503,27 +515,78 @@ def get_queue():
     })
 
 
+@app.route('/api/history')
+def get_history():
+    """Get all tasks history (completed, failed, processing, timeout)"""
+    with scheduler.lock:
+        tasks = []
+        for task_id, task_data in scheduler.active_tasks.items():
+            # Check if audio file exists and create download link
+            audio_url = None
+            if task_data.get("generated_audio") and os.path.exists(task_data.get("generated_audio")):
+                audio_url = f"/api/download/audio/{task_id}"
+
+            # Check if video file exists locally
+            video_url = task_data.get("result", {}).get("data", {}).get("result_url")
+            local_video_path = os.path.join(OUTPUT_FOLDER, f"{task_id}_output.mp4")
+            if os.path.exists(local_video_path):
+                video_url = f"/api/download/{task_id}"
+
+            task_info = {
+                "task_id": task_id,
+                "status": task_data.get("status", "unknown"),
+                "start_time": task_data.get("start_time").isoformat() if task_data.get("start_time") else None,
+                "completed_time": task_data.get("completed_time").isoformat() if task_data.get("completed_time") else None,
+                "gpu_id": task_data.get("gpu_id"),
+                "input_text": task_data.get("input_text", "")[:200],  # Truncate for list view
+                "reference_audio": task_data.get("reference_audio"),
+                "generated_audio_url": audio_url,
+                "audio_duration": task_data.get("audio_duration", 0),
+                "error": task_data.get("error"),
+                "progress": task_data.get("progress", 0),
+                "timing": {
+                    "tts_time": task_data.get("tts_time"),
+                    "video_time": task_data.get("video_time"),
+                    "total_time": task_data.get("total_time")
+                },
+                "vimeo_url": task_data.get("vimeo_url"),
+                "vimeo_uploaded": task_data.get("vimeo_uploaded", False),
+                "result_url": video_url
+            }
+            tasks.append(task_info)
+
+        
+        # Sort by start_time (newest first)
+        tasks.sort(key=lambda x: x.get("start_time") or "", reverse=True)
+        
+    return jsonify({
+        "total": len(tasks),
+        "tasks": tasks
+    })
+
+
+
 @app.route('/api/health')
 def health():
     """Health check"""
     return jsonify({
         "status": "healthy",
-        "service": "Dual GPU + Dual TTS",
+        "service": "Triple GPU + Chatterbox TTS",
         "timestamp": datetime.now().isoformat()
     })
 
 
 if __name__ == '__main__':
     print("\n" + "="*80)
-    print("🚀 Triple GPU + Triple TTS Video Generation API Server")
+    print("🚀 Triple GPU + Chatterbox TTS Video Generation API Server")
     print("="*80)
-    print("📍 Running on: http://0.0.0.0:5003")
+    print("📍 Running on: http://0.0.0.0:5004")
     print("🎬 GPU Configuration:")
-    print("   - GPU 0: Video Port 8390, TTS Port 18182 (heygem-tts-dual-0)")
-    print("   - GPU 1: Video Port 8391, TTS Port 18183 (heygem-tts-dual-1)")
-    print("   - GPU 2: Video Port 8392, TTS Port 18184 (heygem-tts-dual-2)")
-    print("🎤 Dedicated TTS per GPU - No bottleneck!")
+    print("   - GPU 0: Video Port 8390, Chatterbox TTS Port 20182")
+    print("   - GPU 1: Video Port 8391, Chatterbox TTS Port 20183")
+    print("   - GPU 2: Video Port 8392, Chatterbox TTS Port 20184")
+    print("🎤 Chatterbox-Turbo: Zero-shot voice cloning with ultra-low latency!")
     print("="*80 + "\n")
     
-    app.run(host='0.0.0.0', port=5003, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=5004, debug=True, threaded=True)
     
