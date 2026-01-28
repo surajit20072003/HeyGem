@@ -15,6 +15,7 @@ import threading
 from datetime import datetime
 from text_normalization import latex_to_speech
 from chatterbox_scheduler import scheduler
+from library_manager import LibraryManager
 
 app = Flask(__name__)
 CORS(app)
@@ -26,6 +27,9 @@ DEFAULT_REFERENCE_AUDIO = os.path.join(BASE_DIR, 'reference_audio.wav')
 UPLOAD_FOLDER = os.path.abspath('./uploads')
 OUTPUT_FOLDER = os.path.abspath('./outputs')
 TEMP_FOLDER = os.path.abspath('./temp')
+
+# Initialize Library Manager
+lib_manager = LibraryManager(BASE_DIR)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -201,13 +205,20 @@ def api_info():
     })
 
 
-def process_task_background(task_id, text, video_path):
+def process_task_background(task_id, text, video_path, audio_path=None):
     """Background task with atomic GPU reservation"""
     reserved_gpu_id = None
     
     try:
         # Step 1: Extract or use default reference audio
-        if video_path:
+        reference_audio = None
+        
+        if audio_path:
+             # Use explicit audio path (e.g. from Library)
+             reference_audio = audio_path
+             print(f"\n🎵 [Task {task_id}] Using provided reference audio: {reference_audio}")
+             
+        elif video_path:
             scheduler.set_preprocessing_status(task_id, "Extracting audio from video...")
             print(f"\n🎬 [Task {task_id}] Extracting audio from video...")
             
@@ -433,12 +444,30 @@ def generate_video():
                 video_file.save(video_path)
                 print(f"   ✅ Video uploaded: {video_file.filename}")
         
+        # Check for Avatar ID (Overwrites video_path if valid)
+        avatar_id = request.form.get('avatar_id')
+        audio_path = None # Explicit audio path
+        
+        if avatar_id:
+            print(f"   👤 Avatar ID provided: {avatar_id}")
+            lib_video, lib_audio = lib_manager.get_avatar_paths(avatar_id)
+            if lib_video and lib_audio:
+                video_path = lib_video
+                audio_path = lib_audio 
+                print(f"   ✅ Found avatar assets: {os.path.basename(video_path)}")
+                print(f"   ✅ Using stored audio: {os.path.basename(audio_path)}")
+            else:
+                 return jsonify({"error": "id not match"}), 400
+
         if not video_path:
-            print(f"   📹 No video uploaded - will use default video + default reference audio")
+            print(f"   📹 No input provided - Using DEFAULTS")
+            video_path = DEFAULT_VIDEO_PATH
+            audio_path = DEFAULT_REFERENCE_AUDIO
         
         print(f"\n{'='*80}")
         print(f"📥 New Task: {task_id}")
         print(f"   Video: {os.path.basename(video_path) if video_path else 'DEFAULT'}")
+        print(f"   Audio: {os.path.basename(audio_path) if audio_path else 'Auot-Extract'}")
         print(f"   Text: {text[:100]}..." if len(text) > 100 else f"   Text: {text}")
         print(f"{'='*80}")
         
@@ -448,7 +477,7 @@ def generate_video():
         # Start background processing (audio extraction + TTS + queue)
         bg_thread = threading.Thread(
             target=process_task_background,
-            args=(task_id, text, video_path),
+            args=(task_id, text, video_path, audio_path),
             daemon=True
         )
         bg_thread.start()
@@ -575,6 +604,72 @@ def health():
         "timestamp": datetime.now().isoformat()
     })
 
+
+# --- Library API Endpoints ---
+
+@app.route('/api/library/upload', methods=['POST'])
+def library_upload():
+    """Upload new avatar to library"""
+    try:
+        if 'video' not in request.files:
+            return jsonify({"error": "No video file provided"}), 400
+            
+        video_file = request.files['video']
+        name = request.form.get('name', 'Untitled Avatar')
+        
+        if video_file.filename == '':
+            return jsonify({"error": "Empty filename"}), 400
+            
+        # Save to temp first
+        temp_filename = f"lib_upload_{int(time.time())}_{video_file.filename}"
+        temp_video_path = os.path.join(TEMP_FOLDER, temp_filename)
+        video_file.save(temp_video_path)
+        
+        # Audio Handling: Check if explicit audio provided
+        temp_audio_path = None
+        if 'audio' in request.files and request.files['audio'].filename != '':
+            audio_file = request.files['audio']
+            temp_audio_name = f"lib_upload_audio_{int(time.time())}_{audio_file.filename}"
+            temp_audio_path = os.path.join(TEMP_FOLDER, temp_audio_name)
+            audio_file.save(temp_audio_path)
+            print(f"   🎤 Using explicit reference audio: {audio_file.filename}")
+        else:
+            # Extract audio from video
+            try:
+                print(f"   🎤 Extracting audio from video...")
+                temp_audio_path = extract_audio_from_video(temp_video_path)
+            except Exception as e:
+                # Cleanup video if audio fails
+                if os.path.exists(temp_video_path):
+                    os.remove(temp_video_path)
+                return jsonify({"error": f"Audio extraction failed: {str(e)}"}), 500
+            
+        # Add to library
+        result = lib_manager.add_avatar(temp_video_path, temp_audio_path, name)
+        
+        # Cleanup temp files
+        if os.path.exists(temp_video_path):
+            os.remove(temp_video_path)
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/library/list', methods=['GET'])
+def library_list():
+    """List all avatars"""
+    return jsonify({
+        "avatars": lib_manager.list_avatars()
+    })
+
+@app.route('/api/library/delete/<avatar_id>', methods=['DELETE'])
+def library_delete(avatar_id):
+    """Delete avatar"""
+    success = lib_manager.delete_avatar(avatar_id)
+    return jsonify({"success": success})
 
 if __name__ == '__main__':
     print("\n" + "="*80)

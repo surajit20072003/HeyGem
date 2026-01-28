@@ -43,59 +43,44 @@
             font-size: 1.1em;
         }
 
-        .gpu-status {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
+        /* Tabs */
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px;
+            border-radius: 12px;
         }
 
-        .gpu-card {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease;
-        }
-
-        .gpu-card:hover {
-            transform: translateY(-5px);
-        }
-
-        .gpu-card h3 {
-            color: #FF6B6B;
-            margin-bottom: 15px;
-            font-size: 1.5em;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9em;
+        .tab-btn {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            background: transparent;
+            color: white;
+            font-size: 1.1em;
             font-weight: bold;
-            margin: 5px 0;
-        }
-
-        .status-free {
-            background: #4caf50;
-            color: white;
-        }
-
-        .status-busy {
-            background: #ff9800;
-            color: white;
-        }
-
-        .tts-info {
-            background: #e3f2fd;
-            padding: 10px;
+            cursor: pointer;
             border-radius: 8px;
-            margin-top: 10px;
-            font-size: 0.9em;
+            transition: all 0.3s;
         }
 
-        .upload-section {
+        .tab-btn.active {
+            background: white;
+            color: #FF6B6B;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Reuse existing styles */
+        .card {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
             padding: 30px;
@@ -129,26 +114,16 @@
             border-color: #764ba2;
         }
 
-        .drop-zone.dragover {
-            background: #d4d9ff;
-            border-color: #5a67d8;
-        }
-
-        textarea {
+        textarea,
+        input[type="text"],
+        select {
             width: 100%;
             padding: 15px;
             border: 2px solid #ddd;
             border-radius: 10px;
             font-size: 1em;
             font-family: inherit;
-            resize: vertical;
-            min-height: 120px;
-            transition: border-color 0.3s ease;
-        }
-
-        textarea:focus {
-            outline: none;
-            border-color: #667eea;
+            margin-bottom: 10px;
         }
 
         .btn {
@@ -162,6 +137,7 @@
             cursor: pointer;
             transition: all 0.3s ease;
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            display: inline-block;
         }
 
         .btn:hover {
@@ -169,51 +145,90 @@
             box-shadow: 0 7px 20px rgba(102, 126, 234, 0.6);
         }
 
-        .btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 0.9em;
         }
 
-        .queue-section {
+        .btn-delete {
+            background: #ef5350;
+        }
+
+        /* Avatar Grid */
+        .avatar-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .avatar-card {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            border: 1px solid #eee;
+        }
+
+        .avatar-id {
+            background: #e3f2fd;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #1976d2;
+            cursor: pointer;
+            word-break: break-all;
+        }
+
+        /* GPU Status */
+        .gpu-status {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .gpu-card {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+            padding: 25px;
         }
 
-        .queue-item {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 10px;
-            border-left: 4px solid #667eea;
+        /* Misc */
+        .badge-success {
+            background: #4caf50;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
 
-        .queue-item strong {
-            color: #667eea;
+        .badge-busy {
+            background: #ff9800;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
 
-        #file-name {
-            margin-top: 10px;
-            color: #667eea;
-            font-weight: bold;
-        }
-
-        .info-box {
-            background: #fff3cd;
-            border: 1px solid #ffc107;
-            border-radius: 10px;
-            padding: 15px;
+        .toggle-container {
+            display: flex;
+            background: #f0f0f0;
+            padding: 5px;
+            border-radius: 8px;
+            width: fit-content;
             margin-bottom: 20px;
         }
 
-        .success-box {
-            background: #d4edda;
-            border: 1px solid #28a745;
-            border-radius: 10px;
-            padding: 15px;
-            margin-top: 20px;
+        .toggle-btn {
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .toggle-btn.active {
+            background: white;
+            color: #667eea;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
     </style>
 </head>
@@ -221,302 +236,346 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎙️ Chatterbox Voice Cloning</h1>
-            <a href="/static/history.html"
-                style="display: inline-block; margin: 10px 0; padding: 8px 16px; background: #FF6B6B; color: white; text-decoration: none; border-radius: 8px; font-weight: 600;">📊
-                View Task History</a>
-            <p class="subtitle">Triple GPU + Chatterbox TTS • Zero-Shot Voice Cloning • Port 5004</p>
-        </div>
-
-        <div class="info-box">
-            <strong>⚡ High Performance Architecture:</strong><br>
-            <strong>GPU 0:</strong> Video Port 8390 + Chatterbox TTS Port 20182<br>
-            <strong>GPU 1:</strong> Video Port 8391 + Chatterbox TTS Port 20183<br>
-            <strong>GPU 2:</strong> Video Port 8392 + Chatterbox TTS Port 20184
-        </div>
-
-        <div class="gpu-status" id="gpu-status">
-            <!-- GPU status cards will be inserted here -->
-        </div>
-
-        <div class="upload-section">
-            <h2 style="color: #FF6B6B; margin-bottom: 20px;">Generate Video</h2>
-
-            <form id="upload-form">
-                <div class="form-group">
-                    <label>📹 Upload Reference Video (Optional)</label>
-                    <div class="drop-zone" id="drop-zone">
-                        <p style="font-size: 1.2em; color: #667eea;">🎬 Drag & Drop Video Here</p>
-                        <p style="color: #999; margin-top: 10px;">or click to browse</p>
-                        <input type="file" id="video-input" accept="video/*" style="display: none;">
-                    </div>
-                    <div id="file-name"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h1>🎙️ Chatterbox Studio</h1>
+                    <p class="subtitle">Asset Library & Video Generation Platform</p>
                 </div>
-
-                <div class="form-group">
-                    <label>💬 Enter Text to Speak</label>
-                    <textarea id="text-input" placeholder="Enter the text you want the avatar to speak..."
-                        required></textarea>
-                </div>
-
-                <div class="form-group">
-                    <div style="cursor: pointer; color: #667eea; font-weight: bold; margin-bottom: 15px; user-select: none;"
-                        id="toggle-advanced">
-                        ⚙️ Advanced Settings (Click to expand)
-                    </div>
-
-                    <div id="advanced-settings"
-                        style="display: none; background: #f8f9ff; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                            <div>
-                                <label title="Higher = More creative/emotional. Lower = More stable/robotic.">
-                                    🌡️ Temperature: <span id="temp-val">0.7</span>
-                                </label>
-                                <input type="range" id="temperature" min="0.1" max="1.5" step="0.1" value="0.7"
-                                    style="width: 100%;">
-                                <small style="color: #666;">Stability ↔️ Creativity</small>
-                            </div>
-
-                            <div>
-                                <label title="Higher = Prevents repetition. Lower = Allows repetition.">
-                                    🔄 Repetition Penalty: <span id="rep-val">1.2</span>
-                                </label>
-                                <input type="range" id="repetition_penalty" min="1.0" max="2.0" step="0.1" value="1.2"
-                                    style="width: 100%;">
-                                <small style="color: #666;">Looping Prevention</small>
-                            </div>
-
-                            <div>
-                                <label title="Higher = More expressive/dramatic style.">
-                                    🎭 Exaggeration: <span id="exag-val">0.0</span>
-                                </label>
-                                <input type="range" id="exaggeration" min="0.0" max="1.0" step="0.1" value="0.0"
-                                    style="width: 100%;">
-                                <small style="color: #666;">Flat ↔️ Expressive</small>
-                            </div>
-
-                            <div>
-                                <label title="Controls probability mass. Standard LLM setting.">
-                                    🎲 Top-P: <span id="topp-val">0.95</span>
-                                </label>
-                                <input type="range" id="top_p" min="0.1" max="1.0" step="0.05" value="0.95"
-                                    style="width: 100%;">
-                                <small style="color: #666;">Sampling Quality</small>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn" id="submit-btn">
-                    🎥 Generate Video
-                </button>
-            </form>
-
-            <div id="result" style="margin-top: 20px;"></div>
-        </div>
-
-        <div class="queue-section">
-            <h2 style="color: #667eea; margin-bottom: 20px;">📋 Task Queue</h2>
-            <div id="queue-list">
-                <p style="color: #999;">No tasks in queue</p>
+                <a href="/static/history.html" class="btn btn-small">📊 History</a>
             </div>
         </div>
+
+        <!-- GPU Status Section -->
+        <div class="gpu-status" id="gpu-status"></div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('generate')">🎬 Generate Video</button>
+            <button class="tab-btn" onclick="switchTab('admin')">⚙️ Asset Library (Admin)</button>
+        </div>
+
+        <!-- TAB 1: Generate Video -->
+        <div id="tab-generate" class="tab-content active">
+            <div class="card">
+                <h2 style="color: #FF6B6B; margin-bottom: 20px;">Create New Video</h2>
+
+                <form id="generate-form">
+                    <!-- Source Selection -->
+                    <div class="form-group">
+                        <label>Avatar Source</label>
+                        <div class="toggle-container">
+                            <div class="toggle-btn active" id="toggle-library" onclick="setSourceMode('library')">📚 Use
+                                Saved Avatar</div>
+                            <div class="toggle-btn" id="toggle-upload" onclick="setSourceMode('upload')">📤 Upload New
+                            </div>
+                        </div>
+
+                        <!-- Mode 1: Library Selector -->
+                        <div id="source-library">
+                            <select id="avatar-select">
+                                <option value="">-- Select an Avatar --</option>
+                            </select>
+                            <small style="color: #666;">Select a pre-trained avatar from your library.</small>
+                        </div>
+
+                        <!-- Mode 2: File Upload (Legacy) -->
+                        <div id="source-upload" style="display:none;">
+                            <div class="drop-zone" id="gen-drop-zone">
+                                <p>🎬 Drag & Drop Video Here</p>
+                                <input type="file" id="gen-video-input" accept="video/*" style="display: none;">
+                            </div>
+                            <div id="gen-file-name" style="margin-top:5px; color:#667eea; font-weight:bold;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Text Input -->
+                    <div class="form-group">
+                        <label>Script</label>
+                        <textarea id="text-input" placeholder="Enter the text you want the avatar to speak..."
+                            required></textarea>
+                    </div>
+
+                    <button type="submit" class="btn" id="gen-submit-btn">🎥 Generate Video</button>
+                </form>
+
+                <div id="result" style="margin-top: 20px;"></div>
+            </div>
+
+            <div class="card">
+                <h3 style="color: #667eea; margin-bottom: 10px;">📋 Task Queue</h3>
+                <div id="queue-list">No tasks in queue</div>
+            </div>
+        </div>
+
+        <!-- TAB 2: Admin Portal -->
+        <div id="tab-admin" class="tab-content">
+            <div class="card">
+                <h2 style="color: #FF6B6B; margin-bottom: 20px;">Add New Avatar</h2>
+
+                <form id="upload-avatar-form">
+                    <div class="form-group">
+                        <label>Avatar Name</label>
+                        <input type="text" id="avatar-name" placeholder="e.g., News Anchor John" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Source Video</label>
+                        <div class="drop-zone" id="admin-drop-zone">
+                            <p>📤 Drag & Drop Source Video Here</p>
+                            <input type="file" id="admin-video-input" accept="video/*" style="display: none;">
+                        </div>
+                        <div id="admin-file-name" style="margin-top:5px; color:#667eea; font-weight:bold;"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Reference Audio (Optional)</label>
+                        <div class="drop-zone" id="admin-audio-drop-zone" style="padding: 20px; border-color: #4caf50;">
+                            <p>🎤 Upload Custom Audio Reference (Optional)</p>
+                            <input type="file" id="admin-audio-input" accept="audio/*" style="display: none;">
+                        </div>
+                        <div id="admin-audio-file-name" style="margin-top:5px; color:#4caf50; font-weight:bold;"></div>
+                        <small style="color:#666">If empty, audio will be extracted from the video.</small>
+                    </div>
+
+                    <button type="submit" class="btn" id="upload-btn">💾 Save to Library</button>
+                    <div id="upload-status" style="margin-top:10px;"></div>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2 style="color: #667eea;">📚 Avatar Library</h2>
+                <button onclick="loadLibrary()" class="btn btn-small" style="margin: 10px 0; background: #666;">🔄
+                    Refresh List</button>
+                <div id="avatar-grid" class="avatar-grid">
+                    <!-- Avatars loaded here -->
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        let selectedFile = null;
-        const dropZone = document.getElementById('drop-zone');
-        const videoInput = document.getElementById('video-input');
-        const fileNameDiv = document.getElementById('file-name');
-        const form = document.getElementById('upload-form');
-        const submitBtn = document.getElementById('submit-btn');
+        // State
+        let currentSourceMode = 'library';
+        let selectedGenFile = null;
+        let selectedAdminFile = null;
+        let selectedAdminAudioFile = null;
 
-        // Advanced Settings Toggle
-        const toggleAdvanced = document.getElementById('toggle-advanced');
-        const advancedSettings = document.getElementById('advanced-settings');
-
-        toggleAdvanced.addEventListener('click', () => {
-            const isHidden = advancedSettings.style.display === 'none';
-            advancedSettings.style.display = isHidden ? 'block' : 'none';
-            toggleAdvanced.textContent = isHidden ? '⚙️ Advanced Settings (Click to collapse)' : '⚙️ Advanced Settings (Click to expand)';
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            loadLibrary(); // Load avatars for dropdown and grid
+            updateGPUStatus();
+            updateQueue();
+            setInterval(updateGPUStatus, 3000);
+            setInterval(updateQueue, 3000);
         });
 
-        // Sliders live update
-        document.getElementById('temperature').addEventListener('input', (e) => document.getElementById('temp-val').textContent = e.target.value);
-        document.getElementById('repetition_penalty').addEventListener('input', (e) => document.getElementById('rep-val').textContent = e.target.value);
-        document.getElementById('exaggeration').addEventListener('input', (e) => document.getElementById('exag-val').textContent = e.target.value);
-        document.getElementById('top_p').addEventListener('input', (e) => document.getElementById('topp-val').textContent = e.target.value);
+        // --- UI Logic ---
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
 
-        // Drag and drop
-        dropZone.addEventListener('click', () => videoInput.click());
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            event.target.classList.add('active');
+        }
 
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('dragover');
+        function setSourceMode(mode) {
+            currentSourceMode = mode;
+            document.getElementById('toggle-library').className = `toggle-btn ${mode === 'library' ? 'active' : ''}`;
+            document.getElementById('toggle-upload').className = `toggle-btn ${mode === 'upload' ? 'active' : ''}`;
+
+            document.getElementById('source-library').style.display = mode === 'library' ? 'block' : 'none';
+            document.getElementById('source-upload').style.display = mode === 'upload' ? 'block' : 'none';
+        }
+
+        // --- File Handling ---
+        // Generator Drop Zone
+        const genDrop = document.getElementById('gen-drop-zone');
+        genDrop.addEventListener('click', () => document.getElementById('gen-video-input').click());
+        document.getElementById('gen-video-input').addEventListener('change', (e) => {
+            selectedGenFile = e.target.files[0];
+            document.getElementById('gen-file-name').textContent = selectedGenFile.name;
         });
 
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('dragover');
+        // Admin Drop Zone
+        const adminDrop = document.getElementById('admin-drop-zone');
+        adminDrop.addEventListener('click', () => document.getElementById('admin-video-input').click());
+        document.getElementById('admin-video-input').addEventListener('change', (e) => {
+            selectedAdminFile = e.target.files[0];
+            document.getElementById('admin-file-name').textContent = selectedAdminFile.name;
         });
 
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                selectedFile = files[0];
-                fileNameDiv.textContent = `✓ Selected: ${selectedFile.name}`;
-            }
+        // Admin Audio Drop Zone
+        const adminAudioDrop = document.getElementById('admin-audio-drop-zone');
+        adminAudioDrop.addEventListener('click', () => document.getElementById('admin-audio-input').click());
+        document.getElementById('admin-audio-input').addEventListener('change', (e) => {
+            selectedAdminAudioFile = e.target.files[0];
+            document.getElementById('admin-audio-file-name').textContent = "🎤 " + selectedAdminAudioFile.name;
         });
 
-        videoInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                selectedFile = e.target.files[0];
-                fileNameDiv.textContent = `✓ Selected: ${selectedFile.name}`;
-            }
-        });
-
-        // Form submission
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const text = document.getElementById('text-input').value;
-            if (!text) {
-                alert('Please enter text');
-                return;
-            }
-
-            submitBtn.disabled = true;
-            submitBtn.textContent = '⏳ Processing...';
-
-            const formData = new FormData();
-            if (selectedFile) {
-                formData.append('video', selectedFile);
-            }
-            formData.append('text', text);
-
-            // Add Advanced Parameters
-            formData.append('temperature', document.getElementById('temperature').value);
-            formData.append('repetition_penalty', document.getElementById('repetition_penalty').value);
-            formData.append('exaggeration', document.getElementById('exaggeration').value);
-            formData.append('top_p', document.getElementById('top_p').value);
-
+        // --- API: Library ---
+        async function loadLibrary() {
             try {
-                const response = await fetch('/api/generate', {
-                    method: 'POST',
-                    body: formData
+                const res = await fetch('/api/library/list');
+                const data = await res.json();
+
+                // Populate Dropdown
+                const select = document.getElementById('avatar-select');
+                select.innerHTML = '<option value="">-- Select an Avatar --</option>';
+                data.avatars.forEach(av => {
+                    const opt = document.createElement('option');
+                    opt.value = av.id;
+                    opt.textContent = `${av.name} (${av.id})`;
+                    select.appendChild(opt);
                 });
 
-                const result = await response.json();
-
-                if (result.success) {
-                    document.getElementById('result').innerHTML = `
-                        <div class="success-box">
-                            <strong>✅ Task Submitted Successfully!</strong><br>
-                            Task ID: ${result.task_id}<br>
-                            <a href="${result.status_url}" target="_blank">Check Status</a>
+                // Populate Grid
+                const grid = document.getElementById('avatar-grid');
+                grid.innerHTML = '';
+                data.avatars.forEach(av => {
+                    const card = document.createElement('div');
+                    card.className = 'avatar-card';
+                    card.innerHTML = `
+                        <h3>${av.name}</h3>
+                        <div class="avatar-id" onclick="navigator.clipboard.writeText('${av.id}'); alert('Copied ID!')">
+                            ${av.id} 📋
                         </div>
+                        <p style="color:#666; font-size:0.8em; margin:5px 0;">Added: ${new Date(av.created_at).toLocaleDateString()}</p>
+                        <button onclick="deleteAvatar('${av.id}')" class="btn btn-small btn-delete" style="margin-top:10px;">🗑️ Delete</button>
                     `;
+                    grid.appendChild(card);
+                });
+            } catch (e) {
+                console.error("Failed to load library", e);
+            }
+        }
 
-                    // Start polling for result
-                    pollTaskResult(result.task_id);
+        async function deleteAvatar(id) {
+            if (!confirm("Are you sure you want to delete this avatar?")) return;
+            await fetch(`/api/library/delete/${id}`, { method: 'DELETE' });
+            loadLibrary();
+        }
 
+        // --- Forms ---
+        // Upload Avatar
+        document.getElementById('upload-avatar-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!selectedAdminFile) return alert("Please select a video file");
 
-                    // Reset form
-                    // form.reset(); // Don't reset to keep settings
-                    // selectedFile = null;
-                    // fileNameDiv.textContent = '';
+            const btn = document.getElementById('upload-btn');
+            const status = document.getElementById('upload-status');
+            btn.disabled = true;
+            btn.textContent = "⏳ Uploading & Processing...";
+            status.innerHTML = "Do not close this tab. Extracting audio...";
 
-                    // Refresh queue
-                    updateQueue();
+            const fd = new FormData();
+            fd.append('video', selectedAdminFile);
+            if (selectedAdminAudioFile) {
+                fd.append('audio', selectedAdminAudioFile);
+            }
+            fd.append('name', document.getElementById('avatar-name').value);
+
+            try {
+                const res = await fetch('/api/library/upload', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.success) {
+                    status.innerHTML = `<span style="color:green">✅ Saved! ID: ${data.avatar_id}</span>`;
+                    loadLibrary();
+                    document.getElementById('upload-avatar-form').reset();
+                    selectedAdminFile = null;
+                    selectedAdminAudioFile = null;
+                    document.getElementById('admin-file-name').textContent = "";
+                    document.getElementById('admin-audio-file-name').textContent = "";
                 } else {
-                    alert('Error: ' + (result.error || 'Unknown error'));
+                    status.innerHTML = `<span style="color:red">❌ Error: ${data.error}</span>`;
                 }
-            } catch (error) {
-                alert('Error submitting task: ' + error.message);
+            } catch (err) {
+                status.innerHTML = `<span style="color:red">❌ Network Error</span>`;
             } finally {
-                submitBtn.disabled = false;
-                submitBtn.textContent = '🎥 Generate Video';
+                btn.disabled = false;
+                btn.textContent = "💾 Save to Library";
             }
         });
 
-        // Update GPU status
+        // Generate Video
+        document.getElementById('generate-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = document.getElementById('text-input').value;
+            const btn = document.getElementById('gen-submit-btn');
+
+            if (!text) return alert("Please enter text");
+
+            const fd = new FormData();
+            fd.append('text', text);
+
+            if (currentSourceMode === 'library') {
+                const avId = document.getElementById('avatar-select').value;
+                if (!avId) return alert("Please select an avatar from the library");
+                fd.append('avatar_id', avId);
+            } else {
+                if (!selectedGenFile) return alert("Please upload a video file");
+                fd.append('video', selectedGenFile);
+            }
+
+            btn.disabled = true;
+            btn.textContent = "⏳ Submitting Task...";
+            document.getElementById('result').innerHTML = "";
+
+            try {
+                const res = await fetch('/api/generate', { method: 'POST', body: fd });
+                const data = await res.json();
+
+                if (data.success) {
+                    document.getElementById('result').innerHTML = `
+                        <div class="success-box">
+                            <strong>✅ Task Started!</strong><br>
+                            ID: ${data.task_id} <br>
+                            Waiting for GPU...
+                        </div>
+                    `;
+                    pollTaskResult(data.task_id);
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch (err) {
+                alert("Submission failed");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "🎥 Generate Video";
+            }
+        });
+
+        // Reuse existing polling / queue logic
         async function updateGPUStatus() {
             try {
                 const response = await fetch('/api/queue');
                 const data = await response.json();
-
                 const gpuStatusDiv = document.getElementById('gpu-status');
                 gpuStatusDiv.innerHTML = '';
-
                 for (const [gpuId, status] of Object.entries(data.gpus)) {
-                    const card = document.createElement('div');
-                    card.className = 'gpu-card';
-                    card.innerHTML = `
-                        <h3>GPU ${gpuId}</h3>
-                        <div class="status-badge ${status.busy ? 'status-busy' : 'status-free'}">
-                            ${status.busy ? '🔴 Busy' : '🟢 Free'}
-                        </div>
-                        <p style="margin-top: 10px; color: #666;">
-                            ${status.current_task ? `Task: ${status.current_task}` : 'No active task'}
-                        </p>
-                        <p style="color: #999; font-size: 0.9em;">Memory: ${status.memory_used}</p>
-                        <div style="margin: 10px 0;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                <span style="color: #666; font-size: 0.9em;">GPU Usage:</span>
-                                <span style="color: #667eea; font-weight: bold;">${status.gpu_utilization || 0}%</span>
-                            </div>
-                            <div style="background: #e0e0e0; border-radius: 10px; height: 8px; overflow: hidden;">
-                                <div style="background: linear-gradient(90deg, #667eea, #764ba2); width: ${status.gpu_utilization || 0}%; height: 100%; transition: width 0.3s ease;"></div>
-                            </div>
-                        </div>
-                        <div class="tts-info">
-                            <strong>🎤 Dedicated TTS:</strong> Port ${status.tts_port}<br>
-                            <strong>🎬 Video:</strong> Port ${status.video_port}
+                    gpuStatusDiv.innerHTML += `
+                        <div class="gpu-card">
+                            <h3>GPU ${gpuId}</h3>
+                            <span class="${status.busy ? 'badge-busy' : 'badge-success'}">${status.busy ? 'Busy' : 'Free'}</span>
+                            <small>${status.current_task || 'Idle'}</small>
                         </div>
                     `;
-                    gpuStatusDiv.appendChild(card);
                 }
-            } catch (error) {
-                console.error('Error updating GPU status:', error);
-            }
+            } catch (e) { }
         }
 
-        // Update queue
         async function updateQueue() {
             try {
                 const response = await fetch('/api/queue');
                 const data = await response.json();
-
-                const queueListDiv = document.getElementById('queue-list');
-
-                if (data.queue.length === 0) {
-                    queueListDiv.innerHTML = '<p style="color: #999;">No tasks in queue</p>';
-                } else {
-                    queueListDiv.innerHTML = '';
-                    data.queue.forEach((task, index) => {
-                        const item = document.createElement('div');
-                        item.className = 'queue-item';
-                        item.innerHTML = `
-                            <strong>Position ${index + 1}:</strong> ${task.task_id}<br>
-                            <small>${task.text}</small><br>
-                            <small style="color: #999;">Queued: ${new Date(task.queued_time).toLocaleString()}</small>
-                        `;
-                        queueListDiv.appendChild(item);
-                    });
+                const qDiv = document.getElementById('queue-list');
+                if (data.queue.length === 0) qDiv.innerHTML = "No tasks in queue";
+                else {
+                    qDiv.innerHTML = data.queue.map(t => `<div style="background:#f9f9f9; padding:10px; margin-bottom:5px;"><strong>${t.task_id}</strong>: ${t.text}</div>`).join('');
                 }
-            } catch (error) {
-                console.error('Error updating queue:', error);
-            }
+            } catch (e) { }
         }
 
-        // Auto-update every 3 seconds
-        setInterval(() => {
-            updateGPUStatus();
-            updateQueue();
-        }, 3000);
-
-        // Poll for task result
         async function pollTaskResult(taskId) {
             const resultDiv = document.getElementById('result');
             const pollInterval = setInterval(async () => {
@@ -524,121 +583,23 @@
                     const response = await fetch(`/api/status/${taskId}`);
                     const data = await response.json();
 
-                    if (data.status === 'completed' && data.result) {
+                    if (data.status === 'completed') {
                         clearInterval(pollInterval);
-
-                        // Get result URL from nested structure or constructed path
-                        let videoUrl = '';
-                        if (data.result && data.result.data && data.result.data.result_url) {
-                            videoUrl = data.result.data.result_url;
-                        } else if (data.result && typeof data.result === 'string') {
-                            videoUrl = data.result;
-                        }
-
-                        // Try to construct URL if missing (fallback)
-                        if (!videoUrl) {
-                            // Extract filename from result path if possible
-                            // Fallback not reliable without knowing filename
-                        }
-
-                        if (videoUrl) {
-                            // Build timing display
-                            let timingHtml = '';
-                            if (data.timing) {
-                                timingHtml = `
-                                    <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                                        <strong style="color: #1976d2;">⏱️ Processing Times:</strong><br>
-                                        ${data.timing.tts_time ? `<span style="color: #666;">🎤 Voice Generation: <strong>${data.timing.tts_time.toFixed(2)}s</strong></span><br>` : ''}
-                                        ${data.timing.video_time ? `<span style="color: #666;">🎬 Video Processing: <strong>${data.timing.video_time.toFixed(2)}s</strong></span><br>` : ''}
-                                        ${data.timing.total_time ? `<span style="color: #666;">⏳ Total Time: <strong>${data.timing.total_time.toFixed(2)}s</strong></span>` : ''}
-                                    </div>
-                                `;
-                            }
-
-                            resultDiv.innerHTML = `
-                                <div class="success-box">
-                                    <h3>🎉 Video Generated Successfully!</h3>
-                                    <p style="margin: 10px 0;">Task ID: ${taskId}</p>
-                                    
-                                    ${timingHtml}
-                                    
-                                    <video width="100%" controls style="border-radius: 10px; margin: 15px 0;">
-                                        <source src="${videoUrl}" type="video/mp4">
-                                        Your browser does not support the video tag.
-                                    </video>
-                                    
-                                    <a href="${videoUrl}" download class="btn" style="display: inline-block; text-decoration: none;">
-                                        ⬇️ Download Video
-                                    </a>
-                                </div>
-                            `;
-
-                            // Show Vimeo upload status (MAIN SECTION)
-                            if (data.vimeo_uploaded) {
-                                resultDiv.innerHTML += `
-                                    <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-top: 10px;">
-                                        <p style="margin: 0 0 10px 0;">
-                                            📤 <strong style="color: #2e7d32;">Vimeo Upload:</strong> 
-                                            <span style="color: #4caf50;">✅ Uploaded Successfully</span>
-                                        </p>
-                                        ${data.vimeo_url ? `
-                                            <a href="${data.vimeo_url}" target="_blank" style="
-                                                display: inline-block;
-                                                padding: 8px 16px;
-                                                background: #1976d2;
-                                                color: white;
-                                                text-decoration: none;
-                                                border-radius: 6px;
-                                                font-size: 14px;
-                                                margin-top: 5px;
-                                            ">
-                                                🎬 View on Vimeo
-                                            </a>
-                                        ` : ''}
-                                        ${data.vimeo_upload_time ? `<br><small style="color: #666; margin-top: 10px; display: block;">Uploaded: ${new Date(data.vimeo_upload_time).toLocaleString()}</small>` : ''}
-                                    </div>
-                                `;
-                            } else if (data.status === 'completed') {
-                                resultDiv.innerHTML += `
-                                    <div style="background: #fff3e0; padding: 10px; border-radius: 8px; margin-top: 10px;">
-                                        <p style="margin: 0;">
-                                            📤 <strong>Vimeo Upload:</strong> 
-                                            <span style="color: #f57c00;">⏭️ Not uploaded (disabled or failed)</span>
-                                        </p>
-                                    </div>
-                                `;
-                            }
-
-                            // Showing Vimeo upload status handled above, removing duplicate block
-                            // (Duplicate block removed)
-                        } else {
-                            resultDiv.innerHTML += '<p>✅ Task completed, but video URL not found.</p>';
-                        }
-
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = '🎥 Generate Video';
+                        let url = data.result?.data?.result_url || data.result;
+                        resultDiv.innerHTML = `
+                            <div class="success-box">
+                                <h3>🎉 Success!</h3>
+                                <video width="100%" controls src="${url}"></video>
+                                <a href="${url}" download class="btn" style="margin-top:10px">Download</a>
+                            </div>`;
                     } else if (data.status === 'failed') {
                         clearInterval(pollInterval);
-                        resultDiv.innerHTML = `
-                            <div class="info-box" style="background: #ffebee; border-color: #ef5350;">
-                                <strong>❌ Task Failed</strong><br>
-                                Error: ${data.error || 'Unknown error'}
-                            </div>
-                        `;
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = '🎥 Generate Video';
+                        resultDiv.innerHTML = `<div class="info-box" style="background:#ffebee">❌ Failed: ${data.error}</div>`;
                     }
-                    // Continue polling if processing/queued
-
-                } catch (error) {
-                    console.error('Polling error:', error);
-                }
-            }, 3000); // Check every 3 seconds
+                } catch (e) { }
+            }, 3000);
         }
 
-        // Initial update
-        updateGPUStatus();
-        updateQueue();
     </script>
 </body>
 
