@@ -276,6 +276,14 @@
                                 <option value="">-- Select an Avatar --</option>
                             </select>
                             <small style="color: #666;">Select a pre-trained avatar from your library.</small>
+
+                            <!-- Avatar Preview -->
+                            <div id="avatar-preview" style="margin-top: 15px; display: none;">
+                                <video id="avatar-preview-video" width="100%"
+                                    style="max-width: 400px; border-radius: 10px;" controls></video>
+                                <p style="margin-top: 5px; color: #667eea; font-weight: bold;" id="avatar-preview-name">
+                                </p>
+                            </div>
                         </div>
 
                         <!-- Mode 2: File Upload (Legacy) -->
@@ -294,6 +302,50 @@
                         <textarea id="text-input" placeholder="Enter the text you want the avatar to speak..."
                             required></textarea>
                     </div>
+
+                    <!-- Language Selector -->
+                    <div class="form-group">
+                        <label>🌐 Language</label>
+                        <select id="language-select">
+                            <option value="english">English (Chatterbox TTS)</option>
+                            <optgroup label="🇮🇳 Indian Languages (IndicTrans2 + Sarvam.ai)">
+                                <option value="kannada">Kannada (ಕನ್ನಡ)</option>
+                                <option value="hindi">Hindi (हिंदी)</option>
+                                <option value="bengali">Bengali (বাংলা)</option>
+                                <option value="tamil">Tamil (தமிழ்)</option>
+                                <option value="telugu">Telugu (తెలుగు)</option>
+                                <option value="malayalam">Malayalam (മലയാളം)</option>
+                                <option value="marathi">Marathi (मराठी)</option>
+                                <option value="gujarati">Gujarati (ગુજરાતી)</option>
+                                <option value="punjabi">Punjabi (ਪੰਜਾਬੀ)</option>
+                                <option value="odia">Odia (ଓଡ଼ିଆ)</option>
+                                <option value="assamese">Assamese (অসমীয়া)</option>
+                            </optgroup>
+                        </select>
+                        <small style="color: #666;">For Indian languages, text will be translated from English
+                            automatically.</small>
+                    </div>
+
+                    <!-- Voice Selector (Only for Indian Languages) -->
+                    <div class="form-group" id="voice-selector-container" style="display: none;">
+                        <label>🎤 Voice Selection</label>
+                        <select id="voice-select">
+                            <optgroup label="👨 Male Voices">
+                                <option value="abhilash" selected>Abhilash</option>
+                                <option value="karun">Karun</option>
+                                <option value="hitesh">Hitesh</option>
+                            </optgroup>
+                            <optgroup label="👩 Female Voices">
+                                <option value="anushka">Anushka</option>
+                                <option value="manisha">Manisha</option>
+                                <option value="vidya">Vidya</option>
+                                <option value="arya">Arya</option>
+                            </optgroup>
+                        </select>
+                        <small style="color: #666;">Select a voice for Indian language TTS (7 voices available
+                            (bulbul:v2)).</small>
+                    </div>
+
 
                     <button type="submit" class="btn" id="gen-submit-btn">🎥 Generate Video</button>
                 </form>
@@ -363,6 +415,38 @@
 
         // Init
         document.addEventListener('DOMContentLoaded', () => {
+
+            // Language selector change handler
+
+            // Avatar preview on selection
+            document.getElementById("avatar-select").addEventListener("change", function () {
+                const avatarId = this.value;
+                const previewDiv = document.getElementById("avatar-preview");
+                const previewVideo = document.getElementById("avatar-preview-video");
+                const previewName = document.getElementById("avatar-preview-name");
+
+                if (avatarId) {
+                    // Show preview
+                    previewDiv.style.display = "block";
+                    previewVideo.src = `/library/${avatarId}/source.mp4`;
+                    previewName.textContent = this.options[this.selectedIndex].text;
+                } else {
+                    // Hide preview
+                    previewDiv.style.display = "none";
+                    previewVideo.src = "";
+                }
+            });
+            document.getElementById("language-select").addEventListener("change", function () {
+                const language = this.value;
+                const voiceContainer = document.getElementById("voice-selector-container");
+                const indianLanguages = ["kannada", "hindi", "bengali", "tamil", "telugu", "malayalam", "marathi", "gujarati", "punjabi", "odia", "assamese"];
+
+                if (indianLanguages.includes(language)) {
+                    voiceContainer.style.display = "block";
+                } else {
+                    voiceContainer.style.display = "none";
+                }
+            });
             loadLibrary(); // Load avatars for dropdown and grid
             updateGPUStatus();
             updateQueue();
@@ -441,6 +525,7 @@
                             ${av.id} 📋
                         </div>
                         <p style="color:#666; font-size:0.8em; margin:5px 0;">Added: ${new Date(av.created_at).toLocaleDateString()}</p>
+                        <button onclick="previewAvatar('${av.id}', '${av.name}')" class="btn btn-small" style="margin-top:10px; margin-right:5px; background:#667eea;">👁️ Preview</button>
                         <button onclick="deleteAvatar('${av.id}')" class="btn btn-small btn-delete" style="margin-top:10px;">🗑️ Delete</button>
                     `;
                     grid.appendChild(card);
@@ -454,6 +539,24 @@
             if (!confirm("Are you sure you want to delete this avatar?")) return;
             await fetch(`/api/library/delete/${id}`, { method: 'DELETE' });
             loadLibrary();
+        }
+
+        async function previewAvatar(id, name) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); display:flex; align-items:center; justify-content:center; z-index:9999;';
+            modal.innerHTML = `
+                <div style="background:white; padding:30px; border-radius:15px; max-width:600px; width:90%;">
+                    <h2 style="margin-bottom:15px; color:#667eea;">��️ Preview: ${name}</h2>
+                    <video width="100%" controls autoplay style="border-radius:10px; margin-bottom:15px;">
+                        <source src="/library/${id}/source.mp4" type="video/mp4">
+                    </video>
+                    <button onclick="this.parentElement.parentElement.remove()" class="btn" style="background:#666;">Close</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.remove();
+            });
         }
 
         // --- Forms ---
@@ -507,6 +610,14 @@
 
             const fd = new FormData();
             fd.append('text', text);
+            fd.append("language", document.getElementById("language-select").value);
+
+            // Add speaker only for Indian languages
+            const language = document.getElementById("language-select").value;
+            const indianLanguages = ["kannada", "hindi", "bengali", "tamil", "telugu", "malayalam", "marathi", "gujarati", "punjabi", "odia", "assamese"];
+            if (indianLanguages.includes(language)) {
+                fd.append("speaker", document.getElementById("voice-select").value);
+            }
 
             if (currentSourceMode === 'library') {
                 const avId = document.getElementById('avatar-select').value;

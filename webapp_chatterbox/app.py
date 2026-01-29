@@ -16,6 +16,8 @@ from datetime import datetime
 from text_normalization import latex_to_speech
 from chatterbox_scheduler import scheduler
 from library_manager import LibraryManager
+from indic_translator import IndicTranslator
+from sarvam_tts import SarvamTTS
 
 app = Flask(__name__)
 CORS(app)
@@ -30,6 +32,17 @@ TEMP_FOLDER = os.path.abspath('./temp')
 
 # Initialize Library Manager
 lib_manager = LibraryManager(BASE_DIR)
+
+# Initialize Indian Language Translation & TTS (11 languages)
+translator = IndicTranslator()
+sarvam_api_key = os.getenv('SARVAM_API_KEY', '')
+sarvam_tts = SarvamTTS(api_key=sarvam_api_key)
+
+# Supported Indian Languages (IndicTrans2 + Sarvam.ai)
+SUPPORTED_INDIAN_LANGUAGES = [
+    'kannada', 'hindi', 'bengali', 'tamil', 'telugu',
+    'malayalam', 'marathi', 'gujarati', 'punjabi', 'odia', 'assamese'
+]
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -171,6 +184,59 @@ def get_audio_duration(audio_file: str) -> float:
     return float(result.stdout.strip())
 
 
+def generate_indian_language_audio(text: str, language: str, speaker: str = 'abhilash', task_id: str = None) -> tuple:
+    """
+    Universal Indian language pipeline: English → Target Language → Audio
+    Supports all 11 Sarvam.ai languages with dynamic voice selection
+    
+    Args:
+        text: English text input
+        language: Target language (kannada, hindi, bengali, etc.)
+        speaker: Voice speaker ID (abhilash, manisha, vidya, etc.)
+        task_id: Task ID for tracking
+    
+    Returns:
+        (audio_path, duration, translated_text)
+    """
+    start_time = time.time()
+    
+    try:
+        # Step 1: Translate English to target language
+        print(f"   📝 Translating to {language.capitalize()}...")
+        print(f"      Input: {text[:100]}...")
+        
+        translated_text = translator.english_to_language(text, language)
+        
+        print(f"      Translated: {translated_text[:100]}...")
+        
+        # Step 2: Generate audio with Sarvam.ai
+        print(f"   🎤 Generating {language.capitalize()} TTS (Voice: {speaker})...")
+        
+        audio_path = sarvam_tts.generate(
+            translated_text,
+            language=language,
+            speaker=speaker,
+            task_id=task_id
+        )
+        
+        # Get duration
+        duration = get_audio_duration(audio_path)
+        total_time = time.time() - start_time
+        
+        print(f"   ✅ {language.capitalize()} pipeline complete!")
+        print(f"      Audio: {audio_path}")
+        print(f"      Duration: {duration:.2f}s")
+        print(f"      Pipeline time: {total_time:.2f}s")
+        
+        return audio_path, duration, translated_text
+        
+    except Exception as e:
+        print(f"   ❌ {language.capitalize()} pipeline failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
 @app.route('/')
 def index():
     return send_file('static/index.html')
@@ -205,7 +271,7 @@ def api_info():
     })
 
 
-def process_task_background(task_id, text, video_path, audio_path=None):
+def process_task_background(task_id, text, video_path, audio_path=None, language='english', speaker='abhilash'):
     """Background task with atomic GPU reservation"""
     reserved_gpu_id = None
     
@@ -264,26 +330,70 @@ def process_task_background(task_id, text, video_path, audio_path=None):
             scheduler.clear_preprocessing_status(task_id)
             return
         
-        # Step 3: GPU reserved! Use its dedicated TTS port
-        tts_port = scheduler.gpu_config[reserved_gpu_id]["tts_port"]
-        
-        scheduler.set_preprocessing_status(
-            task_id, 
-            f"Generating voice on GPU {reserved_gpu_id} (TTS port {tts_port})..."
-        )
-        print(f"\n🎤 [Task {task_id}] GPU {reserved_gpu_id} reserved, generating voice clone using TTS {tts_port}...")
-        
-        cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
-        print(f"   ✓ Voice clone ready: {cloned_audio} ({duration:.2f}s)")
-        
-        # Store TTS timing and audio info in task metadata
-        with scheduler.lock:
-            if task_id in scheduler.active_tasks:
-                scheduler.active_tasks[task_id]["tts_time"] = tts_time
-                scheduler.active_tasks[task_id]["input_text"] = text
-                scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
-                scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
-                scheduler.active_tasks[task_id]["audio_duration"] = duration
+        # Step 3: Generate TTS based on language
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            # Indian language pipeline: IndicTrans2 + Sarvam.ai (NO GPU for TTS)
+            print(f"\n🇮🇳 [Task {task_id}] Using {language.capitalize()} pipeline (IndicTrans2 + Sarvam.ai)...")
+            print(f"   Voice: {speaker}")
+            
+            scheduler.set_preprocessing_status(task_id, f"Translating to {language.capitalize()}...")
+            
+            try:
+                cloned_audio, duration, translated_text = generate_indian_language_audio(text, language, speaker, task_id)
+                
+                # Store translation in task metadata
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["translated_text"] = translated_text
+                        scheduler.active_tasks[task_id]["language"] = language
+                        scheduler.active_tasks[task_id]["speaker"] = speaker
+                        scheduler.active_tasks[task_id]["input_text"] = text
+                        scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                        scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                        scheduler.active_tasks[task_id]["audio_duration"] = duration
+                        scheduler.active_tasks[task_id]["tts_time"] = 0  # API time not tracked separately
+                
+                tts_time = 0
+                
+            except Exception as e:
+                print(f"❌ {language.capitalize()} pipeline failed, falling back to Chatterbox: {e}")
+                # Fallback to Chatterbox
+                tts_port = scheduler.gpu_config[reserved_gpu_id]["tts_port"]
+                scheduler.set_preprocessing_status(
+                    task_id,
+                    f"Generating voice on GPU {reserved_gpu_id} (TTS port {tts_port})..."
+                )
+                cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
+                
+                # Store metadata
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["tts_time"] = tts_time
+                        scheduler.active_tasks[task_id]["input_text"] = text
+                        scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                        scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                        scheduler.active_tasks[task_id]["audio_duration"] = duration
+        else:
+            # English/Other languages: Use Chatterbox TTS
+            tts_port = scheduler.gpu_config[reserved_gpu_id]["tts_port"]
+            
+            scheduler.set_preprocessing_status(
+                task_id, 
+                f"Generating voice on GPU {reserved_gpu_id} (TTS port {tts_port})..."
+            )
+            print(f"\n🎤 [Task {task_id}] GPU {reserved_gpu_id} reserved, generating voice clone using TTS {tts_port}...")
+            
+            cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
+            print(f"   ✓ Voice clone ready: {cloned_audio} ({duration:.2f}s)")
+            
+            # Store TTS timing and audio info in task metadata
+            with scheduler.lock:
+                if task_id in scheduler.active_tasks:
+                    scheduler.active_tasks[task_id]["tts_time"] = tts_time
+                    scheduler.active_tasks[task_id]["input_text"] = text
+                    scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                    scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                    scheduler.active_tasks[task_id]["audio_duration"] = duration
         
         # Step 4: Clear preprocessing status
         scheduler.clear_preprocessing_status(task_id)
@@ -464,10 +574,19 @@ def generate_video():
             video_path = DEFAULT_VIDEO_PATH
             audio_path = DEFAULT_REFERENCE_AUDIO
         
+        # Get language parameter (default: english)
+        language = request.form.get('language', 'english').lower()
+        
+        # Get speaker parameter (default: abhilash) - only for Indian languages
+        speaker = request.form.get('speaker', 'abhilash').lower()
+        
         print(f"\n{'='*80}")
         print(f"📥 New Task: {task_id}")
         print(f"   Video: {os.path.basename(video_path) if video_path else 'DEFAULT'}")
-        print(f"   Audio: {os.path.basename(audio_path) if audio_path else 'Auot-Extract'}")
+        print(f"   Audio: {os.path.basename(audio_path) if audio_path else 'Auto-Extract'}")
+        print(f"   Language: {language.upper()}")
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            print(f"   Speaker: {speaker}")
         print(f"   Text: {text[:100]}..." if len(text) > 100 else f"   Text: {text}")
         print(f"{'='*80}")
         
@@ -477,7 +596,7 @@ def generate_video():
         # Start background processing (audio extraction + TTS + queue)
         bg_thread = threading.Thread(
             target=process_task_background,
-            args=(task_id, text, video_path, audio_path),
+            args=(task_id, text, video_path, audio_path, language, speaker),  # Added speaker
             daemon=True
         )
         bg_thread.start()
@@ -671,6 +790,15 @@ def library_delete(avatar_id):
     success = lib_manager.delete_avatar(avatar_id)
     return jsonify({"success": success})
 
+
+@app.route('/library/<avatar_id>/<filename>')
+def serve_library_file(avatar_id, filename):
+    """Serve library files (source.mp4, audio.wav)"""
+    library_path = os.path.join(BASE_DIR, 'library', avatar_id, filename)
+    if os.path.exists(library_path):
+        return send_file(library_path)
+    else:
+        return jsonify({"error": "File not found"}), 404
 if __name__ == '__main__':
     print("\n" + "="*80)
     print("🚀 Triple GPU + Chatterbox TTS Video Generation API Server")
