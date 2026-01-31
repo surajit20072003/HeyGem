@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Flask API Server for Dual GPU + Dual TTS Setup
-- 2 GPUs (GPU 0 + GPU 1)
-- 2 TTS services (18180 for GPU 0, 18181 for GPU 1)
-- Port 5003
+Flask API Server for Triple GPU + Chatterbox TTS Setup
+- 3 GPUs (GPU 0 + GPU 1 + GPU 2)
+- 3 Chatterbox TTS services (20182 for GPU 0, 20183 for GPU 1, 20184 for GPU 2)
+- Port 5004
 - Proper queue management
 """
 from flask import Flask, request, jsonify, send_file, send_from_directory
@@ -14,7 +14,10 @@ import time
 import threading
 from datetime import datetime
 from text_normalization import latex_to_speech
-from dual_gpu_scheduler import scheduler
+from chatterbox_scheduler import scheduler
+from library_manager import LibraryManager
+from indic_translator import IndicTranslator
+from sarvam_tts import SarvamTTS
 
 app = Flask(__name__)
 CORS(app)
@@ -23,9 +26,23 @@ CORS(app)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_VIDEO_PATH = os.path.join(BASE_DIR, 'default.mp4')
 DEFAULT_REFERENCE_AUDIO = os.path.join(BASE_DIR, 'reference_audio.wav')
-UPLOAD_FOLDER = './uploads'
-OUTPUT_FOLDER = './outputs'
-TEMP_FOLDER = './temp'
+UPLOAD_FOLDER = os.path.abspath('./uploads')
+OUTPUT_FOLDER = os.path.abspath('./outputs')
+TEMP_FOLDER = os.path.abspath('./temp')
+
+# Initialize Library Manager
+lib_manager = LibraryManager(BASE_DIR)
+
+# Initialize Indian Language Translation & TTS (11 languages)
+translator = IndicTranslator()
+sarvam_api_key = os.getenv('SARVAM_API_KEY', '')
+sarvam_tts = SarvamTTS(api_key=sarvam_api_key)
+
+# Supported Indian Languages (IndicTrans2 + Sarvam.ai)
+SUPPORTED_INDIAN_LANGUAGES = [
+    'kannada', 'hindi', 'bengali', 'tamil', 'telugu',
+    'malayalam', 'marathi', 'gujarati', 'punjabi', 'odia', 'assamese'
+]
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -78,34 +95,14 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
     text = latex_to_speech(text)
     print(f"   📐 Normalizing Text (After):  {text[:50]}...")
     
-    # Copy reference audio to TTS data directory (shared volume)
-    # Determine which TTS container based on port
-    if tts_port == 18182:
-        tts_ref_dir = os.path.expanduser("~/heygem_data/tts0/reference")
-    else:  # 18183
-        tts_ref_dir = os.path.expanduser("~/heygem_data/tts1/reference")
+    # Chatterbox uses direct file paths (no Docker volume mapping)
+    # Simply pass the reference audio path directly
+    print(f"   📁 Using reference audio: {reference_audio}")
     
-    os.makedirs(tts_ref_dir, exist_ok=True)
-    
-    # FIX: Use unique filename with task_id to prevent race condition
-    # Instead of: ref_filename = os.path.basename(reference_audio)
-    # This prevents concurrent tasks from overwriting each other's reference audio
-    if task_id:
-        ref_filename = f"ref_{task_id}_{int(time.time())}.wav"
-    else:
-        # Fallback if task_id not provided
-        ref_filename = f"ref_{int(time.time())}_{os.getpid()}.wav"
-    
-    tts_ref_path = os.path.join(tts_ref_dir, ref_filename)
-    subprocess.run(['cp', reference_audio, tts_ref_path])
-    
-    print(f"   📁 Copied reference audio to: {tts_ref_path}")
-    
-    # TTS API call - use invoke directly (no preprocessing needed)
+    # Chatterbox TTS API call
     payload = {
         "text": text,
-        "reference_audio": f"/code/data/reference/{ref_filename}",
-        "reference_text": "",
+        "reference_audio": reference_audio,  # Direct file path
         "format": "wav"
     }
     
@@ -114,7 +111,7 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
         response = requests.post(
             f"{TTS_API}/v1/invoke",
             json=payload,
-            timeout=1200 # Increased to 20 minutes to prevent timeout on slower TTS
+            timeout=5000 # Increased to 20 minutes to prevent timeout on slower TTS
         )
         
         if response.status_code != 200:
@@ -151,11 +148,25 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
         print(f"   Audio duration: {duration:.2f}s")
         print(f"   ⏱️  TTS generation time: {tts_time:.2f}s")
         
+        # UNLOAD MODEL TO FREE GPU MEMORY
+        try:
+            print(f"   🧹 Unloading TTS model from port {tts_port}...")
+            requests.post(f"{TTS_API}/v1/unload", timeout=10)
+        except Exception as e:
+            print(f"   ⚠️  Failed to unload model: {e}")
+        
         return output_audio, duration, tts_time
         
     except Exception as e:
         print(f"   ❌ TTS generation error: {e}")
         print(f"   ⚠️  FALLBACK: Using reference audio due to exception")
+        
+        # Still try to unload model in case of error
+        try:
+            requests.post(f"{TTS_API}/v1/unload", timeout=10)
+        except:
+            pass
+            
         print(f"   ⚠️  Reference audio path: {reference_audio}")
         return reference_audio, 0, 0
 
@@ -173,6 +184,59 @@ def get_audio_duration(audio_file: str) -> float:
     return float(result.stdout.strip())
 
 
+def generate_indian_language_audio(text: str, language: str, speaker: str = 'abhilash', task_id: str = None) -> tuple:
+    """
+    Universal Indian language pipeline: English → Target Language → Audio
+    Supports all 11 Sarvam.ai languages with dynamic voice selection
+    
+    Args:
+        text: English text input
+        language: Target language (kannada, hindi, bengali, etc.)
+        speaker: Voice speaker ID (abhilash, manisha, vidya, etc.)
+        task_id: Task ID for tracking
+    
+    Returns:
+        (audio_path, duration, translated_text)
+    """
+    start_time = time.time()
+    
+    try:
+        # Step 1: Translate English to target language
+        print(f"   📝 Translating to {language.capitalize()}...")
+        print(f"      Input: {text[:100]}...")
+        
+        translated_text = translator.english_to_language(text, language)
+        
+        print(f"      Translated: {translated_text[:100]}...")
+        
+        # Step 2: Generate audio with Sarvam.ai
+        print(f"   🎤 Generating {language.capitalize()} TTS (Voice: {speaker})...")
+        
+        audio_path = sarvam_tts.generate(
+            translated_text,
+            language=language,
+            speaker=speaker,
+            task_id=task_id
+        )
+        
+        # Get duration
+        duration = get_audio_duration(audio_path)
+        total_time = time.time() - start_time
+        
+        print(f"   ✅ {language.capitalize()} pipeline complete!")
+        print(f"      Audio: {audio_path}")
+        print(f"      Duration: {duration:.2f}s")
+        print(f"      Pipeline time: {total_time:.2f}s")
+        
+        return audio_path, duration, translated_text
+        
+    except Exception as e:
+        print(f"   ❌ {language.capitalize()} pipeline failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
 @app.route('/')
 def index():
     return send_file('static/index.html')
@@ -188,24 +252,39 @@ def serve_output(filename):
 def api_info():
     """API information"""
     return jsonify({
-        "service": "Dual GPU + Dual TTS Video Generation",
+        "service": "Triple GPU + Chatterbox TTS Video Generation",
+        "tts_engine": "Chatterbox-Turbo (Resemble AI)",
         "version": "1.0.0",
-        "port": 5003,
+        "port": 5004,
         "gpus": {
-            "0": {"video_port": 8390, "tts_port": 18180},
-            "1": {"video_port": 8391, "tts_port": 18181}
+            "0": {"video_port": 8390, "tts_port": 20182},
+            "1": {"video_port": 8391, "tts_port": 20183},
+            "2": {"video_port": 8392, "tts_port": 20184}
         },
+        "features": [
+            "Zero-shot voice cloning",
+            "Multilingual support (23 languages)",
+            "Paralinguistic tags ([laugh], [cough], [chuckle])",
+            "Ultra-low latency (~200ms)"
+        ],
         "endpoints": ["/api/generate", "/api/status", "/api/queue", "/api/download"]
     })
 
 
-def process_task_background(task_id, text, video_path):
+def process_task_background(task_id, text, video_path, audio_path=None, language='english', speaker='abhilash'):
     """Background task with atomic GPU reservation"""
     reserved_gpu_id = None
     
     try:
         # Step 1: Extract or use default reference audio
-        if video_path:
+        reference_audio = None
+        
+        if audio_path:
+             # Use explicit audio path (e.g. from Library)
+             reference_audio = audio_path
+             print(f"\n🎵 [Task {task_id}] Using provided reference audio: {reference_audio}")
+             
+        elif video_path:
             scheduler.set_preprocessing_status(task_id, "Extracting audio from video...")
             print(f"\n🎬 [Task {task_id}] Extracting audio from video...")
             
@@ -246,30 +325,79 @@ def process_task_background(task_id, text, video_path):
                 task_id=task_id,
                 video_path=video_path,
                 audio_path=reference_audio,
-                text=text
+                text=text,
+                language=language,
+                speaker=speaker
             )
             scheduler.clear_preprocessing_status(task_id)
             return
         
-        # Step 3: GPU reserved! Use its dedicated TTS port
-        tts_port = scheduler.gpu_config[reserved_gpu_id]["tts_port"]
+        # Step 3.5: Use default video if no video uploaded (BEFORE TTS generation)
+        if not video_path:
+            video_path = DEFAULT_VIDEO_PATH
+            print(f"   📹 Using default video: {video_path}")
         
-        scheduler.set_preprocessing_status(
-            task_id, 
-            f"Generating voice on GPU {reserved_gpu_id} (TTS port {tts_port})..."
-        )
-        print(f"\n🎤 [Task {task_id}] GPU {reserved_gpu_id} reserved, generating voice clone using TTS {tts_port}...")
-        
-        cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
-        print(f"   ✓ Voice clone ready: {cloned_audio} ({duration:.2f}s)")
-        
-        # Store TTS timing and audio info in task metadata
-        with scheduler.lock:
-            if task_id in scheduler.active_tasks:
-                scheduler.active_tasks[task_id]["tts_time"] = tts_time
-                scheduler.active_tasks[task_id]["input_text"] = text
-                scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
-                scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+        # Step 4: Generate TTS based on language
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            # Indian language pipeline: IndicTrans2 + Sarvam.ai (NO GPU for TTS)
+            print(f"\n🇮🇳 [Task {task_id}] Using {language.capitalize()} pipeline (IndicTrans2 + Sarvam.ai)...")
+            print(f"   Voice: {speaker}")
+            
+            scheduler.set_preprocessing_status(task_id, f"Translating to {language.capitalize()}...")
+            
+            try:
+                cloned_audio, duration, translated_text = generate_indian_language_audio(text, language, speaker, task_id)
+                
+                # Store translation in task metadata
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["translated_text"] = translated_text
+                        scheduler.active_tasks[task_id]["language"] = language
+                        scheduler.active_tasks[task_id]["speaker"] = speaker
+                        scheduler.active_tasks[task_id]["input_text"] = text
+                        scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                        scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                        scheduler.active_tasks[task_id]["audio_duration"] = duration
+                        scheduler.active_tasks[task_id]["tts_time"] = 0  # API time not tracked separately
+                
+                tts_time = 0
+                
+            except Exception as e:
+                error_msg = f"{language.capitalize()} pipeline failed: {str(e)}"
+                print(f"❌ {error_msg}")
+                
+                # Explicit Failure - DO NOT FALLBACK
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["status"] = "failed"
+                        scheduler.active_tasks[task_id]["error"] = error_msg
+                        scheduler.active_tasks[task_id]["completed_time"] = datetime.now()
+                        scheduler.active_tasks[task_id]["progress"] = 0
+                
+                # Release GPU and return
+                scheduler.release_gpu(reserved_gpu_id, task_id)
+                return
+        else:
+            # English/Other languages: Use Chatterbox TTS
+            tts_port = scheduler.gpu_config[reserved_gpu_id]["tts_port"]
+            
+            scheduler.set_preprocessing_status(
+                task_id, 
+                f"Generating voice on GPU {reserved_gpu_id} (TTS port {tts_port})..."
+            )
+            print(f"\n🎤 [Task {task_id}] GPU {reserved_gpu_id} reserved, generating voice clone using TTS {tts_port}...")
+            
+            cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
+            print(f"   ✓ Voice clone ready: {cloned_audio} ({duration:.2f}s)")
+            
+            # Store TTS timing and audio info in task metadata
+            with scheduler.lock:
+                if task_id in scheduler.active_tasks:
+                    scheduler.active_tasks[task_id]["tts_time"] = tts_time
+                    scheduler.active_tasks[task_id]["input_text"] = text
+                    scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                    scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                    scheduler.active_tasks[task_id]["audio_duration"] = duration
         
         # Step 4: Clear preprocessing status
         scheduler.clear_preprocessing_status(task_id)
@@ -326,31 +454,81 @@ def process_queued_task_with_tts(task_data, gpu_id):
     """
     Process a queued task by generating TTS and then submitting to the reserved GPU.
     Called when a task is dequeued and GPU is already reserved.
+    Supports both English (Chatterbox) and Indian languages (IndicTrans2 + Sarvam.ai).
     """
     task_id = task_data["task_id"]
     text = task_data.get("text", "")
     reference_audio = task_data["audio_path"]  # This is the reference audio
     video_path = task_data["video_path"]
+    language = task_data.get("language", "english")
+    speaker = task_data.get("speaker", "abhilash")
     
     try:
         print(f"\n🎤 [Queued Task {task_id}] Generating TTS on reserved GPU {gpu_id}...")
-        
-        # Get TTS port for reserved GPU
-        tts_port = scheduler.gpu_config[gpu_id]["tts_port"]
-        print(f"   Using TTS port {tts_port} for GPU {gpu_id}")
+        print(f"   Language: {language.upper()}")
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            print(f"   Speaker: {speaker}")
         print(f"   Text: {text[:100]}..." if len(text) > 100 else f"   Text: {text}")
         
-        # Generate TTS
-        cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
-        print(f"   ✓ Voice clone generated: {cloned_audio} ({duration:.2f}s)")
+        # Generate TTS based on language
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            # Indian language pipeline: IndicTrans2 + Sarvam.ai (NO GPU for TTS)
+            print(f"\n🇮🇳 [Queued Task {task_id}] Using {language.capitalize()} pipeline (IndicTrans2 + Sarvam.ai)...")
+            print(f"   Voice: {speaker}")
+            
+            try:
+                cloned_audio, duration, translated_text = generate_indian_language_audio(text, language, speaker, task_id)
+                
+                # Store translation in task metadata
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["translated_text"] = translated_text
+                        scheduler.active_tasks[task_id]["language"] = language
+                        scheduler.active_tasks[task_id]["speaker"] = speaker
+                        scheduler.active_tasks[task_id]["input_text"] = text
+                        scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                        scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                        scheduler.active_tasks[task_id]["audio_duration"] = duration
+                        scheduler.active_tasks[task_id]["tts_time"] = 0  # API time not tracked separately
+                
+                tts_time = 0
+                
+            except Exception as e:
+                error_msg = f"{language.capitalize()} pipeline failed: {str(e)}"
+                print(f"❌ {error_msg}")
+                
+                # Explicit Failure - DO NOT FALLBACK
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["status"] = "failed"
+                        scheduler.active_tasks[task_id]["error"] = error_msg
+                        scheduler.active_tasks[task_id]["completed_time"] = datetime.now()
+                        scheduler.active_tasks[task_id]["progress"] = 0
+                
+                # Release GPU and return
+                scheduler.release_gpu(gpu_id, task_id)
+                return
+        else:
+            # English/Other languages: Use Chatterbox TTS
+            tts_port = scheduler.gpu_config[gpu_id]["tts_port"]
+            print(f"   Using Chatterbox TTS port {tts_port} for GPU {gpu_id}")
+            
+            cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
+            print(f"   ✓ Voice clone generated: {cloned_audio} ({duration:.2f}s)")
+            
+            # Store TTS timing and audio info in task metadata
+            with scheduler.lock:
+                if task_id in scheduler.active_tasks:
+                    scheduler.active_tasks[task_id]["tts_time"] = tts_time
+                    scheduler.active_tasks[task_id]["input_text"] = text
+                    scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                    scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                    scheduler.active_tasks[task_id]["audio_duration"] = duration
         
-        # Store TTS timing and audio info in task metadata
-        with scheduler.lock:
-            if task_id in scheduler.active_tasks:
-                scheduler.active_tasks[task_id]["tts_time"] = tts_time
-                scheduler.active_tasks[task_id]["input_text"] = text
-                scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
-                scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+        # Use default video if no video provided
+        if not video_path or not os.path.exists(video_path):
+            video_path = DEFAULT_VIDEO_PATH
+            print(f"   📹 Using default video: {video_path}")
         
         # Submit to the reserved GPU
         print(f"\n📤 [Queued Task {task_id}] Submitting to GPU {gpu_id}...")
@@ -409,8 +587,9 @@ def generate_video():
         if not text:
             return jsonify({"error": "No text provided"}), 400
         
-        # Generate task_id
-        task_id = f"task_{int(time.time())}"
+        # Generate task_id with UUID for uniqueness (prevents duplicates in parallel requests)
+        import uuid
+        task_id = f"task_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         
         # Check if video file is present (optional now)
         video_path = None
@@ -428,12 +607,39 @@ def generate_video():
                 video_file.save(video_path)
                 print(f"   ✅ Video uploaded: {video_file.filename}")
         
+        # Check for Avatar ID (Overwrites video_path if valid)
+        avatar_id = request.form.get('avatar_id')
+        audio_path = None # Explicit audio path
+        
+        if avatar_id:
+            print(f"   👤 Avatar ID provided: {avatar_id}")
+            lib_video, lib_audio = lib_manager.get_avatar_paths(avatar_id)
+            if lib_video and lib_audio:
+                video_path = lib_video
+                audio_path = lib_audio 
+                print(f"   ✅ Found avatar assets: {os.path.basename(video_path)}")
+                print(f"   ✅ Using stored audio: {os.path.basename(audio_path)}")
+            else:
+                 return jsonify({"error": "id not match"}), 400
+
         if not video_path:
-            print(f"   📹 No video uploaded - will use default video + default reference audio")
+            print(f"   📹 No input provided - Using DEFAULTS")
+            video_path = DEFAULT_VIDEO_PATH
+            audio_path = DEFAULT_REFERENCE_AUDIO
+        
+        # Get language parameter (default: english)
+        language = request.form.get('language', 'english').lower()
+        
+        # Get speaker parameter (default: abhilash) - only for Indian languages
+        speaker = request.form.get('speaker', 'abhilash').lower()
         
         print(f"\n{'='*80}")
         print(f"📥 New Task: {task_id}")
         print(f"   Video: {os.path.basename(video_path) if video_path else 'DEFAULT'}")
+        print(f"   Audio: {os.path.basename(audio_path) if audio_path else 'Auto-Extract'}")
+        print(f"   Language: {language.upper()}")
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            print(f"   Speaker: {speaker}")
         print(f"   Text: {text[:100]}..." if len(text) > 100 else f"   Text: {text}")
         print(f"{'='*80}")
         
@@ -443,7 +649,7 @@ def generate_video():
         # Start background processing (audio extraction + TTS + queue)
         bg_thread = threading.Thread(
             target=process_task_background,
-            args=(task_id, text, video_path),
+            args=(task_id, text, video_path, audio_path, language, speaker),  # Added speaker
             daemon=True
         )
         bg_thread.start()
@@ -478,6 +684,17 @@ def download_video(task_id):
         return jsonify({"error": "Video not found"}), 404
 
 
+@app.route('/api/download/audio/<task_id>')
+def download_audio(task_id):
+    """Download generated audio"""
+    filename = f"tts_{task_id}.wav"
+    file_path = os.path.join(TEMP_FOLDER, filename)
+    
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True)
+    return jsonify({"error": "Audio file not found"}), 404
+
+
 @app.route('/api/queue')
 def get_queue():
     """Get current task queue status"""
@@ -499,692 +716,153 @@ def get_queue():
     })
 
 
+@app.route('/api/history')
+def get_history():
+    """Get all tasks history (completed, failed, processing, timeout)"""
+    with scheduler.lock:
+        tasks = []
+        for task_id, task_data in scheduler.active_tasks.items():
+            # Check if audio file exists and create download link
+            audio_url = None
+            if task_data.get("generated_audio") and os.path.exists(task_data.get("generated_audio")):
+                audio_url = f"/api/download/audio/{task_id}"
+
+            # Check if video file exists locally
+            video_url = task_data.get("result", {}).get("data", {}).get("result_url")
+            local_video_path = os.path.join(OUTPUT_FOLDER, f"{task_id}_output.mp4")
+            if os.path.exists(local_video_path):
+                video_url = f"/api/download/{task_id}"
+
+            task_info = {
+                "task_id": task_id,
+                "status": task_data.get("status", "unknown"),
+                "start_time": task_data.get("start_time").isoformat() if task_data.get("start_time") else None,
+                "completed_time": task_data.get("completed_time").isoformat() if task_data.get("completed_time") else None,
+                "gpu_id": task_data.get("gpu_id"),
+                "input_text": task_data.get("input_text", "")[:200],  # Truncate for list view
+                "reference_audio": task_data.get("reference_audio"),
+                "generated_audio_url": audio_url,
+                "audio_duration": task_data.get("audio_duration", 0),
+                "error": task_data.get("error"),
+                "progress": task_data.get("progress", 0),
+                "timing": {
+                    "tts_time": task_data.get("tts_time"),
+                    "video_time": task_data.get("video_time"),
+                    "total_time": task_data.get("total_time")
+                },
+                "vimeo_url": task_data.get("vimeo_url"),
+                "vimeo_uploaded": task_data.get("vimeo_uploaded", False),
+                "result_url": video_url
+            }
+            tasks.append(task_info)
+
+        
+        # Sort by start_time (newest first)
+        tasks.sort(key=lambda x: x.get("start_time") or "", reverse=True)
+        
+    return jsonify({
+        "total": len(tasks),
+        "tasks": tasks
+    })
+
+
+
 @app.route('/api/health')
 def health():
     """Health check"""
     return jsonify({
         "status": "healthy",
-        "service": "Dual GPU + Dual TTS",
+        "service": "Triple GPU + Chatterbox TTS",
         "timestamp": datetime.now().isoformat()
     })
 
 
+# --- Library API Endpoints ---
+
+@app.route('/api/library/upload', methods=['POST'])
+def library_upload():
+    """Upload new avatar to library"""
+    try:
+        if 'video' not in request.files:
+            return jsonify({"error": "No video file provided"}), 400
+            
+        video_file = request.files['video']
+        name = request.form.get('name', 'Untitled Avatar')
+        
+        if video_file.filename == '':
+            return jsonify({"error": "Empty filename"}), 400
+            
+        # Save to temp first
+        temp_filename = f"lib_upload_{int(time.time())}_{video_file.filename}"
+        temp_video_path = os.path.join(TEMP_FOLDER, temp_filename)
+        video_file.save(temp_video_path)
+        
+        # Audio Handling: Check if explicit audio provided
+        temp_audio_path = None
+        if 'audio' in request.files and request.files['audio'].filename != '':
+            audio_file = request.files['audio']
+            temp_audio_name = f"lib_upload_audio_{int(time.time())}_{audio_file.filename}"
+            temp_audio_path = os.path.join(TEMP_FOLDER, temp_audio_name)
+            audio_file.save(temp_audio_path)
+            print(f"   🎤 Using explicit reference audio: {audio_file.filename}")
+        else:
+            # Extract audio from video
+            try:
+                print(f"   🎤 Extracting audio from video...")
+                temp_audio_path = extract_audio_from_video(temp_video_path)
+            except Exception as e:
+                # Cleanup video if audio fails
+                if os.path.exists(temp_video_path):
+                    os.remove(temp_video_path)
+                return jsonify({"error": f"Audio extraction failed: {str(e)}"}), 500
+            
+        # Add to library
+        result = lib_manager.add_avatar(temp_video_path, temp_audio_path, name)
+        
+        # Cleanup temp files
+        if os.path.exists(temp_video_path):
+            os.remove(temp_video_path)
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/library/list', methods=['GET'])
+def library_list():
+    """List all avatars"""
+    return jsonify({
+        "avatars": lib_manager.list_avatars()
+    })
+
+@app.route('/api/library/delete/<avatar_id>', methods=['DELETE'])
+def library_delete(avatar_id):
+    """Delete avatar"""
+    success = lib_manager.delete_avatar(avatar_id)
+    return jsonify({"success": success})
+
+
+@app.route('/library/<avatar_id>/<filename>')
+def serve_library_file(avatar_id, filename):
+    """Serve library files (source.mp4, audio.wav)"""
+    library_path = os.path.join(BASE_DIR, 'library', avatar_id, filename)
+    if os.path.exists(library_path):
+        return send_file(library_path)
+    else:
+        return jsonify({"error": "File not found"}), 404
 if __name__ == '__main__':
     print("\n" + "="*80)
-    print("🚀 Dual GPU + Dual TTS Video Generation API Server")
+    print("🚀 Triple GPU + Chatterbox TTS Video Generation API Server")
     print("="*80)
-    print("📍 Running on: http://0.0.0.0:5003")
+    print("📍 Running on: http://0.0.0.0:5004")
     print("🎬 GPU Configuration:")
-    print("   - GPU 0: Video Port 8390, TTS Port 18182 (heygem-tts-dual-0)")
-    print("   - GPU 1: Video Port 8391, TTS Port 18183 (heygem-tts-dual-1)")
-    print("🎤 Dedicated TTS per GPU - No bottleneck!")
+    print("   - GPU 0: Video Port 8390, Chatterbox TTS Port 20182")
+    print("   - GPU 1: Video Port 8391, Chatterbox TTS Port 20183")
+    print("   - GPU 2: Video Port 8392, Chatterbox TTS Port 20184")
+    print("🎤 Chatterbox-Turbo: Zero-shot voice cloning with ultra-low latency!")
     print("="*80 + "\n")
     
-    app.run(host='0.0.0.0', port=5003, debug=True, threaded=True)
-
-
-
-
-#!/usr/bin/env python3
-"""
-Dual GPU Scheduler with Dedicated TTS Containers
-- GPU 0 (Port 8390) → TTS 0 (Port 18180)
-- GPU 1 (Port 8391) → TTS 1 (Port 18181)
-- Proper queue management
-- No GPU 2 usage
-"""
-import requests
-import json
-import time
-import subprocess
-import os
-import threading
-from datetime import datetime
-from queue import Queue
-from typing import Dict, Optional
-
-
-class DualGPUScheduler:
-    def __init__(self):
-        # 2 GPUs with dedicated TTS services
-        self.gpu_config = {
-            0: {
-                "port": 8390,
-                "tts_port": 18182,  # Dedicated TTS for GPU 0 (heygem-tts-dual-0)
-                "busy": False,
-                "current_task": None
-            },
-            1: {
-                "port": 8391,
-                "tts_port": 18183,  # Dedicated TTS for GPU 1 (heygem-tts-dual-1)
-                "busy": False,
-                "current_task": None
-            }
-        }
-        
-        # Task management
-        self.task_queue = Queue()
-        self.active_tasks = {}  # task_id -> {status, gpu_id, progress, ...}
-        self.preprocessing_tasks = {}  # Tasks in audio extraction/TTS phase
-        
-        # Threading
-        self.lock = threading.Lock()
-        
-        print("🚀 Dual GPU Scheduler Initialized")
-        print(f"   GPU 0: Video Port {self.gpu_config[0]['port']}, TTS Port {self.gpu_config[0]['tts_port']} (heygem-tts-dual-0)")
-        print(f"   GPU 1: Video Port {self.gpu_config[1]['port']}, TTS Port {self.gpu_config[1]['tts_port']} (heygem-tts-dual-1)")
-
-    def get_gpu_memory(self, gpu_id: int) -> str:
-        """Get current GPU memory usage via nvidia-smi"""
-        try:
-            result = subprocess.run(
-                ['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader,nounits', f'--id={gpu_id}'],
-                capture_output=True, text=True, timeout=5
-            )
-            return f"{result.stdout.strip()} MiB"
-        except Exception:
-            return "N/A"
+    app.run(host='0.0.0.0', port=5004, debug=True, threaded=True)
     
-    def get_gpu_utilization(self, gpu_id: int) -> int:
-        """Get current GPU utilization percentage"""
-        try:
-            result = subprocess.run(
-                ['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits', f'--id={gpu_id}'],
-                capture_output=True, text=True, timeout=5
-            )
-            return int(result.stdout.strip())
-        except Exception:
-            return 0
-
-    def find_available_gpu(self) -> Optional[int]:
-        """
-        Find first free GPU (0 or 1)
-        Returns: GPU ID or None if both busy
-        """
-        with self.lock:
-            for gpu_id in [0, 1]:  # Only GPU 0 and 1
-                if not self.gpu_config[gpu_id]["busy"]:
-                    return gpu_id
-        return None
-
-    def reserve_gpu_for_task(self, task_id: str) -> Optional[int]:
-        """
-        Atomically reserve a GPU for the entire task lifecycle.
-        This ensures TTS and video generation happen on the SAME GPU.
-        Returns: GPU ID if available, None if all busy (task should queue)
-        """
-        with self.lock:
-            for gpu_id in [0, 1]:
-                if not self.gpu_config[gpu_id]["busy"]:
-                    # Reserve immediately - atomic operation
-                    self.gpu_config[gpu_id]["busy"] = True
-                    self.gpu_config[gpu_id]["current_task"] = task_id
-                    
-                    # Track reservation
-                    self.active_tasks[task_id] = {
-                        "status": "reserved",
-                        "gpu_id": gpu_id,
-                        "progress": 0,
-                        "reserved_time": datetime.now()
-                    }
-                    
-                    print(f"🔒 [GPU {gpu_id}] Reserved for task {task_id}")
-                    return gpu_id
-        
-        # All GPUs busy
-        print(f"⏸️  [Task {task_id}] All GPUs busy - will queue")
-        return None
-
-    def release_gpu(self, gpu_id: int, task_id: str):
-        """
-        Release GPU and trigger next task in queue.
-        Called when task completes, fails, or times out.
-        """
-        with self.lock:
-            if self.gpu_config[gpu_id]["current_task"] == task_id:
-                self.gpu_config[gpu_id]["busy"] = False
-                self.gpu_config[gpu_id]["current_task"] = None
-                print(f"🔓 [GPU {gpu_id}] Released from task {task_id}")
-            else:
-                print(f"⚠️  [GPU {gpu_id}] Release called but current task is {self.gpu_config[gpu_id]['current_task']}, not {task_id}")
-        
-        # Process next in queue with TTS callback
-        queued_processor = getattr(self, 'queued_task_processor', None)
-        self.process_next_in_queue(queued_task_processor=queued_processor)
-
-    def get_gpu_status(self) -> Dict:
-        """Get status of both GPUs"""
-        with self.lock:
-            return {
-                gpu_id: {
-                    "busy": config["busy"],
-                    "current_task": config["current_task"],
-                    "memory_used": self.get_gpu_memory(gpu_id),
-                    "gpu_utilization": self.get_gpu_utilization(gpu_id),
-                    "video_port": config["port"],
-                    "tts_port": config["tts_port"]
-                }
-                for gpu_id, config in self.gpu_config.items()
-            }
-
-    def submit_to_gpu(self, video_path: str, audio_path: str, task_id: str, gpu_id: int) -> bool:
-        """
-        Submit video generation task to specific GPU.
-        Note: GPU should already be reserved via reserve_gpu_for_task()
-        """
-        import shutil
-        
-        port = self.gpu_config[gpu_id]["port"]
-        
-        print(f"\n📤 [GPU {gpu_id}] Submitting task {task_id}")
-        print(f"   Original Video: {video_path}")
-        print(f"   Original Audio: {audio_path}")
-        print(f"   Port: {port}")
-        
-        # Define host shared directory for this GPU
-        # /home/administrator/heygem_data/gpu0 or gpu1
-        host_shared_dir = os.path.expanduser(f"~/heygem_data/gpu{gpu_id}")
-        os.makedirs(host_shared_dir, exist_ok=True)
-        
-        # Define filenames
-        video_filename = os.path.basename(video_path)
-        audio_filename = os.path.basename(audio_path)
-        
-        # Copy files to shared directory
-        try:
-            # Copy video
-            dest_video_path = os.path.join(host_shared_dir, video_filename)
-            print(f"   Copying video to: {dest_video_path}")
-            shutil.copy2(video_path, dest_video_path)
-            
-            # Copy audio
-            dest_audio_path = os.path.join(host_shared_dir, audio_filename)
-            print(f"   Copying audio to: {dest_audio_path}")
-            shutil.copy2(audio_path, dest_audio_path)
-            
-        except Exception as e:
-            print(f"❌ [GPU {gpu_id}] Error copying files: {e}")
-            return False
-
-        # Construct container-internal paths
-        # Container sees /home/administrator/heygem_data/gpuX as /code/data
-        container_video_path = f"/code/data/{video_filename}"
-        container_audio_path = f"/code/data/{audio_filename}"
-        
-        print(f"   Container Video: {container_video_path}")
-        print(f"   Container Audio: {container_audio_path}")
-        
-        payload = {
-            "audio_url": container_audio_path,
-            "video_url": container_video_path,
-            "code": task_id,
-            "chaofen": 0,
-            "watermark_switch": 0,
-            "pn": 1
-        }
-        
-        try:
-            response = requests.post(
-                f"http://localhost:{port}/easy/submit",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                print(f"✅ [GPU {gpu_id}] Task submitted successfully")
-                
-                # Update task status (GPU already marked as busy)
-                with self.lock:
-                    if task_id in self.active_tasks:
-                        self.active_tasks[task_id]["status"] = "processing"
-                        self.active_tasks[task_id]["start_time"] = datetime.now()
-                        self.active_tasks[task_id]["video_start_time"] = time.time()  # Track video processing start
-                        self.active_tasks[task_id]["video_path"] = video_path
-                        self.active_tasks[task_id]["audio_path"] = audio_path
-                
-                # Start monitoring in background
-                monitor_thread = threading.Thread(
-                    target=self.monitor_task,
-                    args=(task_id, gpu_id, video_path, audio_path),
-                    daemon=True
-                )
-                monitor_thread.start()
-                return True
-            else:
-                print(f"❌ [GPU {gpu_id}] Submission failed: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            print(f"❌ [GPU {gpu_id}] Error submitting: {e}")
-            return False
-
-
-    def monitor_task(self, task_id: str, gpu_id: int, video_path: str, audio_path: str):
-        """Monitor task until completion with timeout and failure detection"""
-        port = self.gpu_config[gpu_id]["port"]
-        max_wait = 1800  # 30 minutes timeout
-        check_interval = 5
-        elapsed = 0
-        consecutive_errors = 0
-        max_consecutive_errors = 5
-        
-        print(f"👁️ [GPU {gpu_id}] Monitoring task {task_id}")
-        
-        while elapsed < max_wait:
-            try:
-                response = requests.get(
-                    f"http://localhost:{port}/easy/query?code={task_id}",
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    consecutive_errors = 0  # Reset error counter
-                    result = response.json()
-                    
-                    # DEBUG: Print full result structure once every 10 seconds or on change
-                    if elapsed % 10 == 0:
-                        print(f"   [DEBUG] GPU {gpu_id} Response: {str(result)[:200]}...")
-                    
-                    data = result.get('data', {})
-                    if data is None: data = {}
-                    
-                    status = data.get('status', 'unknown')
-                    progress = data.get('progress', 0)
-                    
-                    # If status is unknown, check top-level keys
-                    if status == 'unknown':
-                        if result.get('code') == 0 and result.get('msg') == 'success':
-                            # Sometimes success without data might mean queued or processing
-                            pass
-                            
-                    # Update task status
-                    with self.lock:
-                        if task_id in self.active_tasks:
-                            self.active_tasks[task_id]["progress"] = progress
-                            self.active_tasks[task_id]["raw_status"] = status
-                    
-                    print(f"   [{elapsed}s] GPU {gpu_id} - Status: {status}, Progress: {progress}%")
-                    
-                    # Check if completed
-                    # Status 2 = Success/Done, Status 3 = Failed? (based on observation)
-                    is_completed = (
-                        status in ['completed', 'finished', 'done', 2, '2'] or 
-                        'result' in result or 
-                        progress == 100
-                    )
-                    
-                    if is_completed:
-                        print(f"✅ [GPU {gpu_id}] Task {task_id} completed!")
-                        
-                        # Handle Result File
-                        # Handle Result File
-                        # Result from GPU: "/code/data/temp/task_.../result.avi" or "/task_...mp4"
-                        container_result_path = result.get('data', {}).get('result', '')
-                        
-                        # Strip /code/data/ prefix
-                        if container_result_path.startswith('/code/data/'):
-                            rel_path = container_result_path[len('/code/data/'):]
-                        elif container_result_path.startswith('/'):
-                            rel_path = container_result_path[1:]
-                        else:
-                            rel_path = container_result_path
-                            
-                        # Source path in shared volume
-                        host_shared_dir = os.path.expanduser(f"~/heygem_data/gpu{gpu_id}")
-                        source_path = os.path.join(host_shared_dir, rel_path)
-                        
-                        print(f"   [DEBUG] Container Path: {container_result_path}")
-                        print(f"   [DEBUG] Host Source Path: {source_path}")
-                        
-                        # Destination path in webapp outputs
-                        # Use mp4 extension for output
-                        output_filename = f"final_{task_id}.mp4"
-                        dest_path = os.path.join(os.getcwd(), 'outputs', output_filename)
-                        
-                        final_url = ""
-                        
-                        # Try to find the file
-                        found = False
-                        if os.path.exists(source_path):
-                            found = True
-                        else:
-                            # STRICT: Only look for the file named with task_id and -r.mp4 extension
-                            # This ensures we always get the file with merged audio.
-                            # Format: {task_id}-r.mp4 (task_id usually includes "task_" prefix already)
-                            
-                            if task_id.startswith("task_"):
-                                expected_filename = f"{task_id}-r.mp4"
-                            else:
-                                expected_filename = f"task_{task_id}-r.mp4"
-                                
-                            print(f"   [INFO] Looking for specific output file: {expected_filename}")
-
-                            candidates = [
-                                os.path.join(host_shared_dir, "temp", expected_filename),
-                                os.path.join(host_shared_dir, expected_filename)
-                            ]
-                            
-                            for p in candidates:
-                                if os.path.exists(p):
-                                    source_path = p
-                                    found = True
-                                    print(f"   [DEBUG] Found strict match: {source_path}")
-                                    break
-                        
-                        if found:
-                            import shutil
-                            
-                            # Wait for file stability (matching webapp implementation)
-                            print(f"   ⏳ Waiting for file to be completely written...")
-                            prev_size = 0
-                            stable_count = 0
-                            
-                            while stable_count < 3:  # Need 3 consecutive stable checks
-                                time.sleep(2)
-                                current_size = os.path.getsize(source_path)
-                                
-                                if current_size == prev_size and current_size > 10000:
-                                    stable_count += 1
-                                else:
-                                    stable_count = 0
-                                    prev_size = current_size
-                            
-                            print(f"   📁 File stable: {current_size/1024/1024:.1f} MB")
-                            
-                            # Validate file size
-                            if current_size < 100000:  # Less than 100KB is suspicious for video
-                                print(f"   ⚠️ Output file too small ({current_size} bytes), may be corrupted")
-                                with self.lock:
-                                    self.active_tasks[task_id]["status"] = "failed"
-                                    self.active_tasks[task_id]["error"] = f"Output file too small: {current_size} bytes"
-                                self.release_gpu(gpu_id, task_id)
-                                return
-                            
-                            # Copy to output directory
-                            shutil.copy2(source_path, dest_path)
-                            print(f"   💾 Saved output to: {dest_path}")
-                            final_url = f"/outputs/{output_filename}"
-                        else:
-                            print(f"   ⚠️ Result file not found at: {source_path}")
-                            # Mark as failed instead of completed
-                            with self.lock:
-                                self.active_tasks[task_id]["status"] = "failed"
-                                self.active_tasks[task_id]["error"] = "Result file not found"
-                            self.release_gpu(gpu_id, task_id)
-                            return
-                        
-                        # Update Result Payload - add defensive check
-                        if result.get('data') is not None:
-                            result['data']['result_url'] = final_url
-                        
-                        # Calculate video generation time
-                        video_time = None
-                        with self.lock:
-                            if task_id in self.active_tasks and "video_start_time" in self.active_tasks[task_id]:
-                                video_time = time.time() - self.active_tasks[task_id]["video_start_time"]
-                                print(f"   ⏱️  Video generation time: {video_time:.2f}s")
-                        
-                        with self.lock:
-                            self.active_tasks[task_id]["status"] = "completed"
-                            self.active_tasks[task_id]["result"] = result
-                            self.active_tasks[task_id]["completed_time"] = datetime.now()
-                            if video_time is not None:
-                                self.active_tasks[task_id]["video_time"] = video_time
-                        
-                        # Release GPU and process next task
-                        self.release_gpu(gpu_id, task_id)
-                        return
-                    
-                    # Check for explicit failure
-                    if status in ['failed', 'error']:
-                        print(f"❌ [GPU {gpu_id}] Task {task_id} failed!")
-                        
-                        with self.lock:
-                            self.active_tasks[task_id]["status"] = "failed"
-                            self.active_tasks[task_id]["error"] = f"Task failed with status: {status}"
-                        
-                        self.process_next_in_queue()
-                        return
-                
-                else:
-                    consecutive_errors += 1
-                    print(f"⚠️ [GPU {gpu_id}] Query error ({consecutive_errors}/{max_consecutive_errors}): {response.status_code}")
-                
-            except Exception as e:
-                consecutive_errors += 1
-                print(f"⚠️ [GPU {gpu_id}] Monitor error ({consecutive_errors}/{max_consecutive_errors}): {e}")
-            
-            # Check if too many consecutive errors
-            if consecutive_errors >= max_consecutive_errors:
-                print(f"❌ [GPU {gpu_id}] Too many errors, marking task as failed")
-                
-                with self.lock:
-                    self.active_tasks[task_id]["status"] = "failed"
-                    self.active_tasks[task_id]["error"] = "Too many consecutive monitoring errors"
-                
-                # Release GPU and process next task
-                self.release_gpu(gpu_id, task_id)
-                return
-            
-            time.sleep(check_interval)
-            elapsed += check_interval
-        
-        # Timeout occurred
-        print(f"⏰ [GPU {gpu_id}] Task {task_id} timed out after {max_wait}s")
-        
-        with self.lock:
-            self.active_tasks[task_id]["status"] = "timeout"
-            self.active_tasks[task_id]["error"] = f"Timeout after {max_wait} seconds"
-        
-        # Release GPU and process next task
-        self.release_gpu(gpu_id, task_id)
-
-    def add_task(self, video_path: str, audio_path: str, text: str = "", task_id: str = None, tts_duration: float = 0.0) -> str:
-        """Add task to queue"""
-        if task_id is None:
-            task_id = f"task_{int(time.time())}"
-        
-        print(f"\n➕ Adding task {task_id} to queue")
-        print(f"   Video: {video_path}")
-        print(f"   Audio: {audio_path}")
-        print(f"   Text: {text[:50]}..." if len(text) > 50 else f"   Text: {text}")
-        
-        # Add to queue
-        self.task_queue.put({
-            "task_id": task_id,
-            "video_path": video_path,
-            "audio_path": audio_path,
-            "text": text,
-            "tts_duration": tts_duration,
-            "queued_time": datetime.now()
-        })
-        
-        # Initialize task status
-        with self.lock:
-            self.active_tasks[task_id] = {
-                "status": "queued",
-                "progress": 0,
-                "queued_time": datetime.now(),
-                "text": text
-            }
-        
-        # Try to process immediately
-        self.process_next_in_queue()
-        
-        return task_id
-
-    def add_to_queue_only(self, task_id: str, video_path: str, audio_path: str, text: str):
-        """
-        Add task to queue without trying to process.
-        Used when all GPUs are busy during initial request.
-        """
-        print(f"\n📥 Adding task {task_id} to queue (all GPUs busy)")
-        print(f"   Video: {video_path}")
-        print(f"   Audio: {audio_path}")
-        
-        # Add to queue
-        self.task_queue.put({
-            "task_id": task_id,
-            "video_path": video_path,
-            "audio_path": audio_path,
-            "text": text,
-            "queued_time": datetime.now()
-        })
-        
-        # Mark as queued
-        with self.lock:
-            self.active_tasks[task_id] = {
-                "status": "queued",
-                "progress": 0,
-                "queued_time": datetime.now(),
-                "text": text
-            }
-
-    def process_next_in_queue(self, queued_task_processor=None):
-        """
-        Process next task if GPU available.
-        If queued_task_processor callback is provided, it will be called to handle
-        TTS generation for queued tasks.
-        """
-        if self.task_queue.empty():
-            print("📭 Queue is empty")
-            return
-        
-        # Check for available GPU and reserve it atomically
-        gpu_id = None
-        with self.lock:
-            for gid in [0, 1]:
-                if not self.gpu_config[gid]["busy"]:
-                    gpu_id = gid
-                    break
-        
-        if gpu_id is None:
-            print("⏸️ No GPUs available, tasks remain in queue")
-            return
-        
-        # Get next task
-        task_data = self.task_queue.get()
-        task_id = task_data["task_id"]
-        
-        print(f"\n🎬 Processing queued task: {task_id}")
-        print(f"   Will assign to GPU {gpu_id}")
-        print(f"   Queue size remaining: {self.task_queue.qsize()}")
-        
-        # Reserve the GPU for this task
-        with self.lock:
-            self.gpu_config[gpu_id]["busy"] = True
-            self.gpu_config[gpu_id]["current_task"] = task_id
-            
-            # Update task status
-            if task_id in self.active_tasks:
-                self.active_tasks[task_id]["status"] = "reserved"
-                self.active_tasks[task_id]["gpu_id"] = gpu_id
-        
-        print(f"🔒 [GPU {gpu_id}] Reserved for queued task {task_id}")
-        
-        # If callback provided, use it to handle TTS generation
-        if queued_task_processor is not None:
-            print(f"   📝 Task has text: {task_data.get('text', 'N/A')[:50]}...")
-            queued_task_processor(task_data, gpu_id)
-            return
-        
-        # Otherwise, submit directly (audio already generated)
-        success = self.submit_to_gpu(
-            task_data["video_path"],
-            task_data["audio_path"],
-            task_id,
-            gpu_id
-        )
-        
-        if not success:
-            # Submission failed, release GPU and re-queue
-            print(f"⚠️ Submission failed, releasing GPU and re-queuing task {task_id}")
-            self.release_gpu(gpu_id, task_id)
-            self.task_queue.put(task_data)
-            
-            with self.lock:
-                if task_id in self.active_tasks:
-                    self.active_tasks[task_id]["status"] = "queued"
-                    self.active_tasks[task_id]["error"] = "Submission failed, re-queued"
-
-    def get_task_status(self, task_id: str) -> Dict:
-        """Get status of specific task"""
-        with self.lock:
-            if task_id in self.preprocessing_tasks:
-                return {
-                    "status": "preprocessing",
-                    "message": self.preprocessing_tasks[task_id],
-                    "progress": 0
-                }
-            
-            if task_id not in self.active_tasks:
-                return {
-                    "status": "not_found",
-                    "error": f"Task {task_id} not found"
-                }
-            
-            task = self.active_tasks[task_id]
-            
-            # Calculate total processing time
-            total_time = None
-            if task.get("completed_time") and task.get("start_time"):
-                total_time = (task["completed_time"] - task["start_time"]).total_seconds()
-            
-            # Generate URL for generated audio if it exists
-            generated_audio_url = None
-            if task.get("generated_audio"):
-                audio_filename = os.path.basename(task["generated_audio"])
-                # Check if file exists in temp folder
-                if os.path.exists(task["generated_audio"]):
-                    generated_audio_url = f"/outputs/{audio_filename}"  # Serve from temp via outputs
-            
-            return {
-                "status": task.get("status", "unknown"),
-                "progress": task.get("progress", 0),
-                "gpu_id": task.get("gpu_id"),
-                "start_time": task.get("start_time").isoformat() if task.get("start_time") else None,
-                "completed_time": task.get("completed_time").isoformat() if task.get("completed_time") else None,
-                "error": task.get("error"),
-                "result": task.get("result"),
-                "queue_position": self._get_queue_position(task_id),
-                "input_text": task.get("input_text"),  # Original text input
-                "reference_audio": task.get("reference_audio"),  # Reference audio path
-                "generated_audio_url": generated_audio_url,  # Generated TTS audio URL
-                "timing": {
-                    "tts_time": task.get("tts_time"),  # Voice generation time
-                    "video_time": task.get("video_time"),  # Video processing time
-                    "total_time": total_time  # Total time from start to completion
-                }
-            }
-
-    def _get_queue_position(self, task_id: str) -> Optional[int]:
-        """Get position in queue (1-indexed)"""
-        queue_list = list(self.task_queue.queue)
-        for idx, task_data in enumerate(queue_list):
-            if task_data["task_id"] == task_id:
-                return idx + 1
-        return None
-
-    def set_preprocessing_status(self, task_id: str, status_msg: str):
-        """Update status for tasks in audio/TTS phase"""
-        with self.lock:
-            self.preprocessing_tasks[task_id] = status_msg
-
-    def clear_preprocessing_status(self, task_id: str):
-        """Remove from pre-processing (once moved to GPU queue)"""
-        with self.lock:
-            if task_id in self.preprocessing_tasks:
-                del self.preprocessing_tasks[task_id]
-
-
-# Global scheduler instance
-scheduler = DualGPUScheduler()
-
-
-if __name__ == "__main__":
-    print("🚀 Dual GPU Scheduler with Dedicated TTS Services")
-    print("=" * 80)
-    print("GPU 0 (Port 8390) → TTS (Port 18182) [heygem-tts-dual-0]")
-    print("GPU 1 (Port 8391) → TTS (Port 18183) [heygem-tts-dual-1]")
-    print("=" * 80)

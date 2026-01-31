@@ -325,12 +325,19 @@ def process_task_background(task_id, text, video_path, audio_path=None, language
                 task_id=task_id,
                 video_path=video_path,
                 audio_path=reference_audio,
-                text=text
+                text=text,
+                language=language,
+                speaker=speaker
             )
             scheduler.clear_preprocessing_status(task_id)
             return
         
-        # Step 3: Generate TTS based on language
+        # Step 3.5: Use default video if no video uploaded (BEFORE TTS generation)
+        if not video_path:
+            video_path = DEFAULT_VIDEO_PATH
+            print(f"   📹 Using default video: {video_path}")
+        
+        # Step 4: Generate TTS based on language
         if language in SUPPORTED_INDIAN_LANGUAGES:
             # Indian language pipeline: IndicTrans2 + Sarvam.ai (NO GPU for TTS)
             print(f"\n🇮🇳 [Task {task_id}] Using {language.capitalize()} pipeline (IndicTrans2 + Sarvam.ai)...")
@@ -356,23 +363,20 @@ def process_task_background(task_id, text, video_path, audio_path=None, language
                 tts_time = 0
                 
             except Exception as e:
-                print(f"❌ {language.capitalize()} pipeline failed, falling back to Chatterbox: {e}")
-                # Fallback to Chatterbox
-                tts_port = scheduler.gpu_config[reserved_gpu_id]["tts_port"]
-                scheduler.set_preprocessing_status(
-                    task_id,
-                    f"Generating voice on GPU {reserved_gpu_id} (TTS port {tts_port})..."
-                )
-                cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
+                error_msg = f"{language.capitalize()} pipeline failed: {str(e)}"
+                print(f"❌ {error_msg}")
                 
-                # Store metadata
+                # Explicit Failure - DO NOT FALLBACK
                 with scheduler.lock:
                     if task_id in scheduler.active_tasks:
-                        scheduler.active_tasks[task_id]["tts_time"] = tts_time
-                        scheduler.active_tasks[task_id]["input_text"] = text
-                        scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
-                        scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
-                        scheduler.active_tasks[task_id]["audio_duration"] = duration
+                        scheduler.active_tasks[task_id]["status"] = "failed"
+                        scheduler.active_tasks[task_id]["error"] = error_msg
+                        scheduler.active_tasks[task_id]["completed_time"] = datetime.now()
+                        scheduler.active_tasks[task_id]["progress"] = 0
+                
+                # Release GPU and return
+                scheduler.release_gpu(reserved_gpu_id, task_id)
+                return
         else:
             # English/Other languages: Use Chatterbox TTS
             tts_port = scheduler.gpu_config[reserved_gpu_id]["tts_port"]
@@ -450,32 +454,81 @@ def process_queued_task_with_tts(task_data, gpu_id):
     """
     Process a queued task by generating TTS and then submitting to the reserved GPU.
     Called when a task is dequeued and GPU is already reserved.
+    Supports both English (Chatterbox) and Indian languages (IndicTrans2 + Sarvam.ai).
     """
     task_id = task_data["task_id"]
     text = task_data.get("text", "")
     reference_audio = task_data["audio_path"]  # This is the reference audio
     video_path = task_data["video_path"]
+    language = task_data.get("language", "english")
+    speaker = task_data.get("speaker", "abhilash")
     
     try:
         print(f"\n🎤 [Queued Task {task_id}] Generating TTS on reserved GPU {gpu_id}...")
-        
-        # Get TTS port for reserved GPU
-        tts_port = scheduler.gpu_config[gpu_id]["tts_port"]
-        print(f"   Using TTS port {tts_port} for GPU {gpu_id}")
+        print(f"   Language: {language.upper()}")
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            print(f"   Speaker: {speaker}")
         print(f"   Text: {text[:100]}..." if len(text) > 100 else f"   Text: {text}")
         
-        # Generate TTS
-        cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
-        print(f"   ✓ Voice clone generated: {cloned_audio} ({duration:.2f}s)")
+        # Generate TTS based on language
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            # Indian language pipeline: IndicTrans2 + Sarvam.ai (NO GPU for TTS)
+            print(f"\n🇮🇳 [Queued Task {task_id}] Using {language.capitalize()} pipeline (IndicTrans2 + Sarvam.ai)...")
+            print(f"   Voice: {speaker}")
+            
+            try:
+                cloned_audio, duration, translated_text = generate_indian_language_audio(text, language, speaker, task_id)
+                
+                # Store translation in task metadata
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["translated_text"] = translated_text
+                        scheduler.active_tasks[task_id]["language"] = language
+                        scheduler.active_tasks[task_id]["speaker"] = speaker
+                        scheduler.active_tasks[task_id]["input_text"] = text
+                        scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                        scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                        scheduler.active_tasks[task_id]["audio_duration"] = duration
+                        scheduler.active_tasks[task_id]["tts_time"] = 0  # API time not tracked separately
+                
+                tts_time = 0
+                
+            except Exception as e:
+                error_msg = f"{language.capitalize()} pipeline failed: {str(e)}"
+                print(f"❌ {error_msg}")
+                
+                # Explicit Failure - DO NOT FALLBACK
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["status"] = "failed"
+                        scheduler.active_tasks[task_id]["error"] = error_msg
+                        scheduler.active_tasks[task_id]["completed_time"] = datetime.now()
+                        scheduler.active_tasks[task_id]["progress"] = 0
+                
+                # Release GPU and return
+                scheduler.release_gpu(gpu_id, task_id)
+                return
+        else:
+            # English/Other languages: Use Chatterbox TTS
+            tts_port = scheduler.gpu_config[gpu_id]["tts_port"]
+            print(f"   Using Chatterbox TTS port {tts_port} for GPU {gpu_id}")
+            
+            cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
+            print(f"   ✓ Voice clone generated: {cloned_audio} ({duration:.2f}s)")
+            
+            # Store TTS timing and audio info in task metadata
+            with scheduler.lock:
+                if task_id in scheduler.active_tasks:
+                    scheduler.active_tasks[task_id]["tts_time"] = tts_time
+                    scheduler.active_tasks[task_id]["input_text"] = text
+                    scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                    scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                    scheduler.active_tasks[task_id]["audio_duration"] = duration
         
-        # Store TTS timing and audio info in task metadata
-        with scheduler.lock:
-            if task_id in scheduler.active_tasks:
-                scheduler.active_tasks[task_id]["tts_time"] = tts_time
-                scheduler.active_tasks[task_id]["input_text"] = text
-                scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
-                scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
-                scheduler.active_tasks[task_id]["audio_duration"] = duration
+        # Use default video if no video provided
+        if not video_path or not os.path.exists(video_path):
+            video_path = DEFAULT_VIDEO_PATH
+            print(f"   📹 Using default video: {video_path}")
         
         # Submit to the reserved GPU
         print(f"\n📤 [Queued Task {task_id}] Submitting to GPU {gpu_id}...")

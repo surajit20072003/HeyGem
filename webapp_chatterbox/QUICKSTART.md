@@ -1,359 +1,256 @@
-# 🚀 Dual TTS System - Quick Setup Guide
+# 🚀 WebApp Chatterbox - Quick Reference Guide
 
-## ✨ What This System Does
+## ⚡ One-Command Setup (New Server)
 
-This is a **high-performance video generation setup** that uses:
-- **2 GPUs** (GPU 0 and GPU 1)
-- **2 TTS Containers** (one for each GPU)
-- **Port 5003** for web interface
-- **No GPU 2 usage** (available for other work)
+```bash
+cd /nvme0n1-disk/nvme01/HeyGem/webapp_chatterbox
+./setup_new_server.sh
+```
 
-### Key Advantage: **NO TTS BOTTLENECK!** 🎯
-
-Each GPU has its own dedicated TTS service, so they never wait for each other.
+This will automatically:
+- ✅ Install all dependencies
+- ✅ Configure Python environment
+- ✅ Setup Docker containers
+- ✅ Configure systemd services
+- ✅ Start everything
 
 ---
 
-## 📦 Prerequisites Check
+## 🎯 Essential Commands
 
-Before starting, make sure you have:
-
-- [ ] Docker installed
-- [ ] NVIDIA Container Toolkit installed
-- [ ] 2 NVIDIA GPUs (GPU 0 and GPU 1)
-- [ ] Python 3.8+
-- [ ] ffmpeg installed
-
----
-
-## 🎬 Complete Setup in 5 Steps
-
-### Step 1: Create Data Directories
+### Service Management
 
 ```bash
-cd /nvme0n1-disk/nvme01/HeyGem
+# Start
+sudo systemctl start heygem-chatterbox
 
-# Create required directories
-mkdir -p /home/administrator/heygem_data/gpu0
-mkdir -p /home/administrator/heygem_data/gpu1
-mkdir -p /home/administrator/heygem_data/tts0
-mkdir -p /home/administrator/heygem_data/tts1
+# Stop
+sudo systemctl stop heygem-chatterbox
+
+# Restart (service only)
+sudo systemctl restart heygem-chatterbox
+
+# Full restart (containers + service)
+cd /nvme0n1-disk/nvme01/HeyGem/webapp_chatterbox && ./restart_all.sh
+
+# Status
+sudo systemctl status heygem-chatterbox
+
+# Logs (live)
+sudo journalctl -u heygem-chatterbox -f
 ```
 
-### Step 2: Start Docker Containers
+### Health Checks
 
 ```bash
-# Start all 4 containers (2 GPU + 2 TTS)
-docker-compose -f docker-compose-dual-tts.yml up -d
+# API
+curl http://localhost:5004/api/health
 
-# Wait 1-2 minutes for initialization
+# TTS Services
+curl http://localhost:20182/health  # GPU 0
+curl http://localhost:20183/health  # GPU 1
+curl http://localhost:20184/health  # GPU 2
 
-# Check status - you should see 4 containers
-docker ps
+# All ports
+netstat -tlnp | grep -E ':(5004|8390|8391|8392|20182|20183|20184)'
 ```
 
-**Expected Output:**
-```
-CONTAINER ID   IMAGE                           STATUS    PORTS
-xxxxx          guiji2025/heygem.ai             Up        0.0.0.0:8390->8383/tcp
-xxxxx          guiji2025/heygem.ai             Up        0.0.0.0:8391->8383/tcp
-xxxxx          guiji2025/fish-speech-ziming    Up        0.0.0.0:18180->8080/tcp
-xxxxx          guiji2025/fish-speech-ziming    Up        0.0.0.0:18181->8080/tcp
-```
-
-### Step 3: Install Python Dependencies
+### Quick Test
 
 ```bash
-cd webapp_dual_tts
-pip install -r requirements.txt
-```
+# Generate test video
+curl -X POST http://localhost:5004/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Welcome to our service",
+    "language": "english",
+    "speaker": "hitesh"
+  }' | jq .
 
-### Step 4: Test the System
-
-```bash
-# Run system test
-python3 test_system.py
-```
-
-**Expected Output:**
-```
-🧪 Testing TTS Service 0 (Port 18180)...
-   ✅ TTS Service 0 (GPU 0) is responding
-
-🧪 Testing TTS Service 1 (Port 18181)...
-   ✅ TTS Service 1 (GPU 1) is responding
-
-🧪 Testing GPU 0 Container (Port 8390)...
-   ✅ GPU 0 container is responding
-
-🧪 Testing GPU 1 Container (Port 8391)...
-   ✅ GPU 1 container is responding
-
-✅ All tests PASSED! System is ready!
-```
-
-### Step 5: Start the Webapp
-
-**Option A - Quick Start Script:**
-```bash
-./start.sh
-```
-
-**Option B - Manual Start:**
-```bash
-python3 app.py
-```
-
-**You should see:**
-```
-🚀 Dual GPU + Dual TTS Video Generation API Server
-📍 Running on: http://0.0.0.0:5003
-🎬 GPU Configuration:
-   - GPU 0: Video Port 8390, TTS Port 18180
-   - GPU 1: Video Port 8391, TTS Port 18181
-🎤 Dedicated TTS per GPU - No bottleneck!
-```
-
----
-
-## 🌐 Open Browser
-
-Navigate to: **http://localhost:5003**
-
-You should see a beautiful interface with:
-- GPU status cards (showing GPU 0 and GPU 1)
-- Upload section (drag & drop)
-- Queue status
-
----
-
-## 🧪 Quick Test
-
-### Test 1: Check API Info
-```bash
-curl http://localhost:5003/api/info
-```
-
-**Expected Response:**
-```json
-{
-  "service": "Dual GPU + Dual TTS Video Generation",
-  "version": "1.0.0",
-  "port": 5003,
-  "gpus": {
-    "0": {"video_port": 8390, "tts_port": 18180},
-    "1": {"video_port": 8391, "tts_port": 18181}
-  }
-}
-```
-
-### Test 2: Check Queue Status
-```bash
-curl http://localhost:5003/api/queue
-```
-
-### Test 3: Generate a Video
-```bash
-curl -X POST http://localhost:5003/api/generate \
-  -F "video=@/path/to/your/video.mp4" \
-  -F "text=Hello, this is a test of the dual TTS system"
-```
-
----
-
-## 📊 System Architecture
-
-```
-User Upload (Video + Text)
-       ↓
-Extract Audio from Video
-       ↓
-[Smart GPU Selection]
-       ↓
-┌──────────────────┬──────────────────┐
-│   GPU 0 Free?    │   GPU 1 Free?    │
-│   Use TTS 18180  │   Use TTS 18181  │
-└──────────────────┴──────────────────┘
-       ↓                   ↓
-Generate Voice Clone (No Waiting!)
-       ↓
-Queue to Available GPU
-       ↓
-Process Video Generation
-       ↓
-Return Final Video
+# Check status (use task_id from response)
+curl http://localhost:5004/api/status/task_xxx | jq .
 ```
 
 ---
 
 ## 🔧 Troubleshooting
 
-### Issue: Containers not starting
-
+### Service Won't Start
 ```bash
-# Check Docker status
-sudo systemctl status docker
+# Check logs
+sudo journalctl -u heygem-chatterbox -n 100 --no-pager
 
-# Check GPU availability
-nvidia-smi
+# Restart containers
+sudo docker restart heygem-gpu0 heygem-gpu1 heygem-gpu2
 
-# View container logs
-docker logs heygem-tts-0
-docker logs heygem-gpu0
+# Full restart
+./restart_all.sh
 ```
 
-### Issue: Port already in use
-
+### TTS Not Loading
 ```bash
-# Find what's using port 5003
-sudo lsof -i :5003
+# Check TTS logs
+tail -f chatterbox_gpu0.log
 
-# Kill the process
-sudo kill -9 <PID>
-```
-
-### Issue: TTS not responding
-
-```bash
-# Restart TTS containers
-docker restart heygem-tts-0
-docker restart heygem-tts-1
-
-# Wait 30 seconds, then test
-curl http://localhost:18180/
-curl http://localhost:18181/
-```
-
-### Issue: GPU out of memory
-
-```bash
 # Check GPU memory
 nvidia-smi
 
-# If needed, restart GPU containers
-docker restart heygem-gpu0
-docker restart heygem-gpu1
+# Restart service
+sudo systemctl restart heygem-chatterbox
+```
+
+### Port Conflicts
+```bash
+# Find conflicts
+lsof -i :5004
+lsof -i :20182
+
+# Kill manual processes
+sudo pkill -f "chatterbox_service.py"
+sudo pkill -f "app.py"
+
+# Restart clean
+./restart_all.sh
 ```
 
 ---
 
-## 📁 File Structure
+## 📊 System Overview
 
-```
-webapp_dual_tts/
-├── app.py                      # Flask API server (Port 5003)
-├── chatterbox_scheduler.py   # GPU scheduler with Chatterbox TTS
-├── text_normalization.py       # Text preprocessing
-├── requirements.txt            # Python dependencies
-├── README.md                   # Full documentation
-├── start.sh                    # Quick start script
-├── test_system.py             # System test script
-├── static/
-│   └── index.html             # Web interface
-├── uploads/                   # Uploaded videos
-├── outputs/                   # Generated videos
-└── temp/                      # Temporary files
-```
-
----
-
-## 🎯 Port Mapping Summary
-
+### Ports
 | Service | Port | Purpose |
 |---------|------|---------|
-| **Webapp** | 5003 | Web UI + API |
-| **GPU 0 Video** | 8390 | Video generation |
-| **GPU 1 Video** | 8391 | Video generation |
-| **TTS 0** | 18180 | Voice cloning (GPU 0) |
-| **TTS 1** | 18181 | Voice cloning (GPU 1) |
+| Flask API | 5004 | Main REST API |
+| TTS GPU 0 | 20182 | Voice cloning |
+| TTS GPU 1 | 20183 | Voice cloning |
+| TTS GPU 2 | 20184 | Voice cloning |
+| Container GPU 0 | 8390 | Video processing |
+| Container GPU 1 | 8391 | Video processing |
+| Container GPU 2 | 8392 | Video processing |
 
----
+### File Locations
+```
+/nvme0n1-disk/nvme01/HeyGem/webapp_chatterbox/     # Main directory
+├── app.py                                          # Flask app
+├── chatterbox_scheduler.py                         # Scheduler
+├── start_service.sh                               # Startup script
+├── restart_all.sh                                  # Restart script
+├── task_history.json                              # Task database
+├── outputs/                                        # Generated videos
+└── uploads/                                        # User uploads
 
-## ⚡ Performance Tips
+/home/administrator/heygem_data/                    # GPU shared data
+├── gpu0/                                           # GPU 0 files
+├── gpu1/                                           # GPU 1 files
+└── gpu2/                                           # GPU 2 files
 
-### Maximize Throughput
-1. Keep both GPUs warm by submitting tasks in batches
-2. Use shorter texts for faster TTS processing
-3. Monitor queue status regularly
-
-### Optimize Quality
-1. Use high-quality reference videos (1080p+)
-2. Clear audio with minimal background noise
-3. Text should match the reference speaker's style
-
----
-
-## 🔄 Starting/Stopping
-
-### Start Everything
-```bash
-# Start Docker containers
-docker-compose -f docker-compose-dual-tts.yml up -d
-
-# Start webapp
-cd webapp_dual_tts
-./start.sh
+/etc/systemd/system/                                # Services
+├── heygem-chatterbox.service                       # Main service
+└── heygem-chatterbox-containers.service            # Containers
 ```
 
-### Stop Everything
+### Logs
 ```bash
-# Stop webapp (Ctrl+C if running in terminal)
+# Service logs
+sudo journalctl -u heygem-chatterbox -f
 
-# Stop Docker containers
-docker-compose -f docker-compose-dual-tts.yml down
-```
+# TTS logs
+tail -f chatterbox_gpu0.log
+tail -f chatterbox_gpu1.log
+tail -f chatterbox_gpu2.log
 
-### Restart Everything
-```bash
-# Restart containers
-docker-compose -f docker-compose-dual-tts.yml restart
-
-# Restart webapp
-cd webapp_dual_tts
-./start.sh
+# Container logs
+docker logs heygem-gpu0 --tail 50
+docker logs heygem-gpu1 --tail 50
+docker logs heygem-gpu2 --tail 50
 ```
 
 ---
 
-## 📝 Common Use Cases
+## 🌎 Supported Languages
 
-### Generate Single Video
-1. Open http://localhost:5003
-2. Drag & drop video
-3. Enter text
-4. Click "Generate Video"
-5. Monitor progress
-6. Download when complete
+Hindi, Bengali, Tamil, Telugu, Marathi, Malayalam, Kannada, Gujarati, Punjabi, Odia, Assamese, English
 
-### Batch Processing
-Submit multiple videos via API:
+---
+
+## 📞 Quick Support
+
 ```bash
-for video in *.mp4; do
-  curl -X POST http://localhost:5003/api/generate \
-    -F "video=@$video" \
-    -F "text=Your text here"
-  sleep 2
-done
-```
+# System status
+sudo systemctl status heygem-chatterbox --no-pager
 
-### Monitor Queue
-Watch queue in real-time:
-```bash
-watch -n 2 'curl -s http://localhost:5003/api/queue | jq'
+# GPU status
+nvidia-smi
+
+# Disk space
+df -h
+
+# Memory
+free -h
+
+# Processes
+ps aux | grep -E "chatterbox|app.py"
 ```
 
 ---
 
-## 🎉 You're Ready!
+## 🎬 API Examples
 
-Your dual TTS system is now running! Features:
+### Generate Video (English)
+```bash
+curl -X POST http://localhost:5004/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello, this is a test video",
+    "language": "english",
+    "speaker": "hitesh"
+  }'
+```
 
-✅ 2 GPUs for video generation  
-✅ 2 TTS services (no bottleneck)  
-✅ Modern web interface  
-✅ Automatic queue management  
-✅ Real-time status monitoring  
+### Generate Video (Hindi)
+```bash
+curl -X POST http://localhost:5004/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Welcome to our platform",
+    "language": "hindi",
+    "speaker": "hitesh"
+  }'
+```
 
-**Open:** http://localhost:5003
+### Check History
+```bash
+curl http://localhost:5004/api/history | jq .
+```
 
-Happy video generation! 🚀
+---
+
+## 🔐 Environment Variables
+
+Set in service file: `/etc/systemd/system/heygem-chatterbox.service`
+
+```ini
+Environment=SARVAM_API_KEY=your_api_key_here
+Environment=PYTHONUNBUFFERED=1
+Environment=PYENV_ROOT=/home/administrator/.pyenv
+```
+
+After changing, reload:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart heygem-chatterbox
+```
+
+---
+
+## 💡 Pro Tips
+
+1. **Monitor GPU usage**: `watch -n 1 nvidia-smi`
+2. **Keep logs clean**: Rotate logs regularly
+3. **Backup task history**: `cp task_history.json task_history.json.backup`
+4. **Test after restart**: Always run health check
+5. **Check disk space**: Videos can accumulate quickly
+
+---
+
+**For full documentation, see [README.md](README.md)**

@@ -25,5 +25,23 @@
             "video": "library/avatar_65ba8e90/source.mp4",
             "audio": "library/avatar_65ba8e90/audio.wav"
         }
+    },
+    "avatar_c021cf77": {
+        "id": "avatar_c021cf77",
+        "name": "avtar 4",
+        "created_at": "2026-01-29T10:04:34.475930",
+        "paths": {
+            "video": "library/avatar_c021cf77/source.mp4",
+            "audio": "library/avatar_c021cf77/audio.wav"
+        }
+    },
+    "avatar_cd64d674": {
+        "id": "avatar_cd64d674",
+        "name": "avtar5",
+        "created_at": "2026-01-29T15:23:38.101415",
+        "paths": {
+            "video": "library/avatar_cd64d674/source.mp4",
+            "audio": "library/avatar_cd64d674/audio.wav"
+        }
     }
 }

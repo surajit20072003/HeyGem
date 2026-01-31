@@ -88,7 +88,7 @@ class ChatterboxScheduler:
             self.active_tasks = {}
 
     def _save_history(self):
-        """Save task history to JSON file"""
+        """Save task history to JSON file using atomic write"""
         try:
             # Convert datetime objects to strings for JSON serialization
             serializable_tasks = {}
@@ -100,8 +100,11 @@ class ChatterboxScheduler:
                     task_copy['completed_time'] = task_copy['completed_time'].isoformat()
                 serializable_tasks[task_id] = task_copy
             
-            with open(self.history_file, 'w') as f:
+            # Atomic write: Write to temp then rename
+            temp_file = self.history_file + ".tmp"
+            with open(temp_file, 'w') as f:
                 json.dump(serializable_tasks, f, indent=2)
+            os.replace(temp_file, self.history_file)
         except Exception as e:
             print(f"   ⚠️  Error saving history: {e}")
 
@@ -198,6 +201,20 @@ class ChatterboxScheduler:
                 for gpu_id, config in self.gpu_config.items()
             }
 
+    def check_gpu_container_health(self, gpu_id: int) -> bool:
+        """
+        Check if GPU container is healthy and responsive.
+        Returns True if healthy, False otherwise.
+        """
+        port = self.gpu_config[gpu_id]["port"]
+        try:
+            response = requests.get(f"http://localhost:{port}/health", timeout=3)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"⚠️  GPU {gpu_id} container health check failed: {e}")
+            return False
+
+
     def submit_to_gpu(self, video_path: str, audio_path: str, task_id: str, gpu_id: int) -> bool:
         """
         Submit video generation task to specific GPU.
@@ -214,7 +231,7 @@ class ChatterboxScheduler:
         
         # Define host shared directory for this GPU
         # /home/administrator/heygem_data/gpu0 or gpu1
-        host_shared_dir = os.path.expanduser(f"~/heygem_data/gpu{gpu_id}")
+        host_shared_dir = f"/home/administrator/heygem_data/gpu{gpu_id}"
         os.makedirs(host_shared_dir, exist_ok=True)
         
         # Define filenames
@@ -309,7 +326,7 @@ class ChatterboxScheduler:
             rel_path = container_result_path
             
         # Source path in shared volume
-        host_shared_dir = os.path.expanduser(f"~/heygem_data/gpu{gpu_id}")
+        host_shared_dir = f"/home/administrator/heygem_data/gpu{gpu_id}"
         source_path = os.path.join(host_shared_dir, rel_path) if rel_path else ""
         
         # Destination path in webapp outputs
@@ -477,7 +494,7 @@ class ChatterboxScheduler:
                             rel_path = container_result_path
                             
                         # Source path in shared volume
-                        host_shared_dir = os.path.expanduser(f"~/heygem_data/gpu{gpu_id}")
+                        host_shared_dir = f"/home/administrator/heygem_data/gpu{gpu_id}"
                         source_path = os.path.join(host_shared_dir, rel_path)
                         
                         print(f"   [DEBUG] Container Path: {container_result_path}")
@@ -633,7 +650,7 @@ class ChatterboxScheduler:
         # Release GPU and process next task
         self.release_gpu(gpu_id, task_id)
 
-    def add_task(self, video_path: str, audio_path: str, text: str = "", task_id: str = None, tts_duration: float = 0.0) -> str:
+    def add_task(self, video_path: str, audio_path: str, text: str = "", task_id: str = None, tts_duration: float = 0.0, language: str = "english", speaker: str = None) -> str:
         """Add task to queue"""
         if task_id is None:
             task_id = f"task_{int(time.time())}"
@@ -642,6 +659,7 @@ class ChatterboxScheduler:
         print(f"   Video: {video_path}")
         print(f"   Audio: {audio_path}")
         print(f"   Text: {text[:50]}..." if len(text) > 50 else f"   Text: {text}")
+        print(f"   Language: {language}, Speaker: {speaker}")
         
         # Add to queue
         self.task_queue.put({
@@ -650,6 +668,8 @@ class ChatterboxScheduler:
             "audio_path": audio_path,
             "text": text,
             "tts_duration": tts_duration,
+            "language": language,
+            "speaker": speaker,
             "queued_time": datetime.now()
         })
         
@@ -667,7 +687,7 @@ class ChatterboxScheduler:
         
         return task_id
 
-    def add_to_queue_only(self, task_id: str, video_path: str, audio_path: str, text: str):
+    def add_to_queue_only(self, task_id: str, video_path: str, audio_path: str, text: str, language: str = "english", speaker: str = None):
         """
         Add task to queue without trying to process.
         Used when all GPUs are busy during initial request.
@@ -682,6 +702,8 @@ class ChatterboxScheduler:
             "video_path": video_path,
             "audio_path": audio_path,
             "text": text,
+            "language": language,
+            "speaker": speaker,
             "queued_time": datetime.now()
         })
         
@@ -795,7 +817,7 @@ class ChatterboxScheduler:
                 if os.path.exists(task["generated_audio"]):
                     generated_audio_url = f"/outputs/{audio_filename}"  # Serve from temp via outputs
             
-            return {
+            result = {
                 "status": task.get("status", "unknown"),
                 "progress": task.get("progress", 0),
                 "gpu_id": task.get("gpu_id"),
@@ -816,8 +838,17 @@ class ChatterboxScheduler:
                 # Vimeo upload status
                 "vimeo_uploaded": task.get("vimeo_uploaded", False),
                 "vimeo_upload_time": task.get("vimeo_upload_time").isoformat() if task.get("vimeo_upload_time") else None,
-                "vimeo_url": task.get("vimeo_url")
+                "vimeo_url": task.get("vimeo_url"),  # Restored Vimeo URL
             }
+            
+            # Populate metadata
+            metadata_keys = ["language", "speaker", "input_text", "translated_text", "error", "video_path", "audio_path", "video_time", "tts_time"]
+            for key in metadata_keys:
+                if key in task:
+                    result[key] = task[key]
+            
+            return result
+
 
     def _get_queue_position(self, task_id: str) -> Optional[int]:
         """Get position in queue (1-indexed)"""

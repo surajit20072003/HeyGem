@@ -77,8 +77,8 @@ class IndicTranslator:
         # Translate
         translations = self.model.batch_translate(sentences, src_lang, tgt_lang)
         
-        # Return single string or list
-        return translations[0] if len(translations) == 1 else translations
+        # Return joined string always
+        return " ".join(translations)
     
     def english_to_kannada(self, text):
         """Convenience method: English → Kannada"""
