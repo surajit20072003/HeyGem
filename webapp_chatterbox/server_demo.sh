@@ -18,7 +18,6 @@ BASE_DIR="/nvme0n1-disk/nvme01/HeyGem/webapp_chatterbox"
 DATA_DIR="/home/administrator/heygem_data"
 PYTHON_VERSION="3.11.0"
 SARVAM_API_KEY="${SARVAM_API_KEY:-}"
-HUGGING_FACE_HUB_TOKEN="${HUGGING_FACE_HUB_TOKEN:-}"
 
 # Functions
 log_info() {
@@ -69,7 +68,6 @@ check_docker() {
     if ! command -v docker &> /dev/null; then
         log_error "Docker not found. Installing Docker..."
         curl -fsSL https://get.docker.com -o get-docker.sh
-        sed -i 's/docker-model-plugin//g' get-docker.sh
         sudo sh get-docker.sh
         sudo usermod -aG docker $USER
         log_success "Docker installed. Please log out and back in for group changes."
@@ -127,10 +125,6 @@ setup_pyenv() {
     else
         log_info "pyenv already installed"
     fi
-    
-    export PYENV_ROOT="$HOME/.pyenv"
-    export PATH="$PYENV_ROOT/bin:$PATH"
-    eval "$(pyenv init - bash)"
 }
 
 setup_python() {
@@ -161,12 +155,9 @@ setup_venv() {
     
     source chatterbox_venv/bin/activate
     
-    log_info "Installing uv for faster downloads..."
-    pip install uv
-    
-    log_info "Installing Python packages using uv..."
-    uv pip install --upgrade pip
-    uv pip install -r requirements.txt
+    log_info "Installing Python packages..."
+    pip install --upgrade pip -q
+    pip install -r requirements.txt -q
     
     log_success "Python packages installed"
 }
@@ -186,55 +177,30 @@ setup_directories() {
 }
 
 setup_docker_containers() {
-    # Create permissions
-    log_info "Setting permissions..."
-    sudo chmod -R 777 "$DATA_DIR"
+    log_info "Setting up GPU containers..."
     
     # Pull image
     log_info "Pulling Docker image..."
-    sudo docker pull guiji2025/heygem.ai
+    docker pull guiji2025/heygem.ai
     
-    # Start containers using Docker Compose
-    log_info "Starting containers with Docker Compose..."
-    
-    if command -v docker-compose &> /dev/null; then
-        sudo docker-compose up -d
-    else
-        sudo docker compose up -d
-    fi
-    
-    log_success "Containers started via Docker Compose"
-}
-
-setup_models() {
-    log_info "Setting up AI Models..."
-    
-    # IndicTrans2 Model Setup
-    MODEL_DIR="/nvme0n1-disk/nvme01/HeyGem/models/IndicTrans2/en-indic-exp/en-indic-preprint/ct2_fp16_model"
-    TARGET_PARENT_DIR="/nvme0n1-disk/nvme01/HeyGem/models/IndicTrans2/en-indic-exp/en-indic-preprint"
-    
-    if [ ! -d "$MODEL_DIR" ]; then
-        log_info "IndicTrans2 model not found. Setting up..."
+    # Create containers if they don't exist
+    for i in 0 1 2; do
+        container_name="heygem-gpu$i"
+        port=$((8390 + i))
         
-        # Create directory
-        sudo mkdir -p "$TARGET_PARENT_DIR"
-        sudo chown -R $USER:$USER "/nvme0n1-disk/nvme01/HeyGem/models"
-        
-        echo ""
-        log_warning "Downloading IndicTrans2 model from legacy server (69.197.145.4)..."
-        echo "This may ask for the password for 'administrator@69.197.145.4'"
-        
-        # SCP Command
-        scp -r administrator@69.197.145.4:/nvme0n1-disk/nvme01/HeyGem/models/IndicTrans2/en-indic-exp/en-indic-preprint/ct2_fp16_model "$TARGET_PARENT_DIR/"
-        
-        if [ $? -eq 0 ]; then
-            log_success "IndicTrans2 model transferred successfully"
+        if docker ps -a | grep -q "$container_name"; then
+            log_info "Container $container_name already exists"
         else
-            log_error "Failed to transfer model via SCP. Please check connection/password."
+            log_info "Creating container $container_name..."
+            docker create --name "$container_name" \
+                --gpus "\"device=$i\"" \
+                -p "$port:8383" \
+                -v "$DATA_DIR/gpu$i:/code/data" \
+                guiji2025/heygem.ai \
+                python /code/app_local.py --port 8383
+            log_success "Container $container_name created"
         fi
-    else
-        log_success "IndicTrans2 model already exists"
-    fi
+    done
 }
 
 setup_services() {
@@ -266,44 +232,6 @@ configure_environment() {
         echo "Environment=SARVAM_API_KEY=your_key_here"
     else
         log_success "SARVAM_API_KEY configured"
-    fi
-
-    # Configure Sarvam API Key
-    if [ -z "$SARVAM_API_KEY" ] || [ "$SARVAM_API_KEY" == "sk_digx1hbs_nwOqUdNYnWpXstwCsy3YrzQ4" ]; then
-        echo ""
-        log_warning "SARVAM_API_KEY is not set!"
-        echo "This key is required for Indian language TTS features."
-        echo ""
-        read -p "Enter Sarvam API Key (press Enter to skip): " sarvam_key
-        
-        if [ -n "$sarvam_key" ]; then
-             sudo sed -i "s/Environment=SARVAM_API_KEY=your_key_here/Environment=SARVAM_API_KEY=$sarvam_key/" /etc/systemd/system/heygem-chatterbox.service
-             sudo sed -i "s/Environment=SARVAM_API_KEY=/Environment=SARVAM_API_KEY=$sarvam_key/" /etc/systemd/system/heygem-chatterbox.service
-             sudo systemctl daemon-reload
-             log_success "SARVAM_API_KEY configured"
-        else
-             log_warning "Skipping Sarvam API Key configuration. Some features may not work."
-        fi
-    fi
-    
-    # Configure Hugging Face Token
-    if [ -z "$HUGGING_FACE_HUB_TOKEN" ]; then
-        echo ""
-        log_warning "Hugging Face Token is required for TTS models!"
-        echo "1. Go to https://huggingface.co/settings/tokens"
-        echo "2. Create a new token (Type: Read)"
-        echo "3. Copy the token and paste it here"
-        echo ""
-        read -p "Enter Hugging Face Token: " hf_token
-        
-        if [ -n "$hf_token" ]; then
-            # Escape special characters for sed if necessary, but simple alphanumeric tokens are usually safe
-            sudo sed -i "s/Environment=SARVAM_API_KEY=/Environment=HUGGING_FACE_HUB_TOKEN=$hf_token\nEnvironment=SARVAM_API_KEY=/" /etc/systemd/system/heygem-chatterbox.service
-            sudo systemctl daemon-reload
-            log_success "Hugging Face Token configured"
-        else
-            log_error "No token provided! Service may fail to start."
-        fi
     fi
 }
 
@@ -411,7 +339,6 @@ main() {
     setup_python
     setup_venv
     setup_directories
-    setup_models
     setup_docker_containers
     setup_services
     configure_environment
