@@ -442,7 +442,8 @@
                     ${task.generated_audio_url ? `<a href="${task.generated_audio_url}" class="btn" target="_blank">🎵 Download Audio</a>` : ''}
                     ${task.result_url ? `<a href="${task.result_url}" class="btn" target="_blank">🎬 Download Video</a>` : ''}
                     ${task.vimeo_url ? `<a href="${task.vimeo_url}" class="btn" target="_blank">📺 View on Vimeo</a>` : ''}
-                    ${!task.generated_audio_url && !task.result_url && !task.vimeo_url ? '<p style="color: #999;">No results available</p>' : ''}
+                    ${task.b2_url ? `<a href="${task.b2_url}" class="btn" target="_blank">☁️ Download from B2</a>` : ''}
+                    ${!task.generated_audio_url && !task.result_url && !task.vimeo_url && !task.b2_url ? '<p style="color: #999;">No results available</p>' : ''}
                 </div>
             `;
 
