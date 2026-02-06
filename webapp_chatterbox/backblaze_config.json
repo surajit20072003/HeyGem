@@ -1,0 +1,8 @@
+{
+    "enabled": true,
+    "application_key_id": "0058561b2ef9a47000000000a",
+    "application_key": "K005YmGa87nOvkHpegviJs1X19JHrzM",
+    "bucket_name": "Simplelectureaivideo",
+    "bucket_id": "08e57651fb323e1f99ca0417",
+    "file_name_template": "{task_id}.mp4"
+}

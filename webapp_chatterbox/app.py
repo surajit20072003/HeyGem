@@ -752,6 +752,9 @@ def get_history():
                 },
                 "vimeo_url": task_data.get("vimeo_url"),
                 "vimeo_uploaded": task_data.get("vimeo_uploaded", False),
+                "b2_url": task_data.get("b2_url"),
+                "b2_uploaded": task_data.get("b2_uploaded", False),
+                "b2_file_name": task_data.get("b2_file_name"),
                 "result_url": video_url
             }
             tasks.append(task_info)

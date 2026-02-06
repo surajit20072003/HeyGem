@@ -24,6 +24,14 @@ except ImportError:
     VIMEO_AVAILABLE = False
     print("⚠️  Vimeo module not available")
 
+# Backblaze B2 Integration
+try:
+    from backblaze_api import BackblazeUploader
+    B2_AVAILABLE = True
+except ImportError:
+    B2_AVAILABLE = False
+    print("⚠️  Backblaze B2 module not available")
+
 
 class ChatterboxScheduler:
     def __init__(self):
@@ -395,8 +403,11 @@ class ChatterboxScheduler:
                         self.active_tasks[task_id]["video_time"] = video_time
                     self._save_history()  # Persist to file
                         
-                # Auto-upload
+                # Auto-upload to Vimeo (if enabled)
                 self.upload_to_vimeo(task_id, dest_path)
+                
+                # Auto-upload to Backblaze B2 (if enabled)
+                self.upload_to_backblaze(task_id, dest_path)
                 
                 self.release_gpu(gpu_id, task_id)
                 return True
@@ -599,6 +610,9 @@ class ChatterboxScheduler:
                         
                         # Auto-upload to Vimeo (if enabled)
                         self.upload_to_vimeo(task_id, dest_path)
+                        
+                        # Auto-upload to Backblaze B2 (if enabled)
+                        self.upload_to_backblaze(task_id, dest_path)
                         
                         # Release GPU and process next task
                         self.release_gpu(gpu_id, task_id)
@@ -839,6 +853,11 @@ class ChatterboxScheduler:
                 "vimeo_uploaded": task.get("vimeo_uploaded", False),
                 "vimeo_upload_time": task.get("vimeo_upload_time").isoformat() if task.get("vimeo_upload_time") else None,
                 "vimeo_url": task.get("vimeo_url"),  # Restored Vimeo URL
+                # Backblaze B2 upload status
+                "b2_uploaded": task.get("b2_uploaded", False),
+                "b2_upload_time": task.get("b2_upload_time").isoformat() if task.get("b2_upload_time") else None,
+                "b2_url": task.get("b2_url"),
+                "b2_file_name": task.get("b2_file_name"),
             }
             
             # Populate metadata
@@ -933,6 +952,65 @@ class ChatterboxScheduler:
         except Exception as e:
             print(f"   ❌ Vimeo upload error: {e}")
             # Don't block task completion on upload failure
+
+    def upload_to_backblaze(self, task_id: str, video_path: str):
+        """
+        Auto-upload completed video to Backblaze B2 (if enabled)
+        """
+        if not B2_AVAILABLE:
+            print(f"   ⏭️  Backblaze B2 upload skipped - module not available")
+            return
+        
+        # Load B2 config
+        config_path = os.path.join(os.path.dirname(__file__), "backblaze_config.json")
+        
+        if not os.path.exists(config_path):
+            print(f"   ⏭️  B2 upload skipped - config not found")
+            return
+        
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"   ⚠️  Failed to load B2 config: {e}")
+            return
+        
+        if not config.get("enabled", False):
+            print(f"   ⏭️  B2 upload disabled in config")
+            return
+        
+        # Generate file name
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = config.get("file_name_template", "heygem_{task_id}.mp4").format(
+            task_id=task_id,
+            date=date_str
+        )
+        
+        print(f"\n📤 [Backblaze B2] Uploading {task_id}...")
+        print(f"   File: {video_path}")
+        print(f"   Name: {file_name}")
+        
+        try:
+            uploader = BackblazeUploader(config)
+            b2_url = uploader.upload_video(video_path, file_name)
+            
+            if b2_url:
+                with self.lock:
+                    if task_id in self.active_tasks:
+                        self.active_tasks[task_id]["b2_uploaded"] = True
+                        self.active_tasks[task_id]["b2_upload_time"] = datetime.now()
+                        self.active_tasks[task_id]["b2_url"] = b2_url
+                        self.active_tasks[task_id]["b2_file_name"] = file_name
+                
+                print(f"   ✅ B2 upload successful!")
+                print(f"   🔗 Link: {b2_url}")
+            else:
+                print(f"   ⚠️  B2 upload failed for {task_id}")
+                
+        except Exception as e:
+            print(f"   ❌ B2 upload error: {e}")
+            # Don't block task completion on upload failure
+
 
 
 # Global scheduler instance
