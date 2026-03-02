@@ -81,8 +81,61 @@ for i in $(seq 1 $max_retries); do
     sleep 2
 done
 
-# Step 5: Start Flask app
+# Step 5: Start Flask app in background
 echo ""
 echo "5️⃣ Starting Flask app on port 5004..."
 echo "=================================================="
-exec python app.py
+python app.py >> flask_app.log 2>&1 &
+FLASK_PID=$!
+echo "   🌐 Flask started (PID: $FLASK_PID)"
+
+# Step 6: Watchdog — monitor all workers and restart if they crash
+echo ""
+echo "6️⃣ Watchdog active — monitoring all services..."
+echo "=================================================="
+
+restart_worker() {
+    local GPU=$1
+    local PORT=$2
+    local LOG=$3
+    echo "   🔁 [$(date '+%H:%M:%S')] Restarting TTS GPU $GPU (port $PORT)..."
+    python chatterbox_service.py --port $PORT --gpu $GPU >> $LOG 2>&1 &
+    eval "CHATTERBOX_${GPU}_PID=$!"
+    echo "   ✅ GPU $GPU restarted (PID: ${!})"
+}
+
+while true; do
+    sleep 10
+
+    # Check GPU 0 worker
+    if ! kill -0 $CHATTERBOX_0_PID 2>/dev/null; then
+        echo "   ❌ [$(date '+%H:%M:%S')] GPU 0 TTS worker (port 20182) crashed! Restarting..."
+        python chatterbox_service.py --port 20182 --gpu 0 >> chatterbox_gpu0.log 2>&1 &
+        CHATTERBOX_0_PID=$!
+        echo "   ✅ GPU 0 restarted (PID: $CHATTERBOX_0_PID)"
+    fi
+
+    # Check GPU 1 worker
+    if ! kill -0 $CHATTERBOX_1_PID 2>/dev/null; then
+        echo "   ❌ [$(date '+%H:%M:%S')] GPU 1 TTS worker (port 20183) crashed! Restarting..."
+        python chatterbox_service.py --port 20183 --gpu 1 >> chatterbox_gpu1.log 2>&1 &
+        CHATTERBOX_1_PID=$!
+        echo "   ✅ GPU 1 restarted (PID: $CHATTERBOX_1_PID)"
+    fi
+
+    # Check GPU 2 worker
+    if ! kill -0 $CHATTERBOX_2_PID 2>/dev/null; then
+        echo "   ❌ [$(date '+%H:%M:%S')] GPU 2 TTS worker (port 20184) crashed! Restarting..."
+        python chatterbox_service.py --port 20184 --gpu 2 >> chatterbox_gpu2.log 2>&1 &
+        CHATTERBOX_2_PID=$!
+        echo "   ✅ GPU 2 restarted (PID: $CHATTERBOX_2_PID)"
+    fi
+
+    # Check Flask app
+    if ! kill -0 $FLASK_PID 2>/dev/null; then
+        echo "   ❌ [$(date '+%H:%M:%S')] Flask app crashed! Restarting..."
+        python app.py >> flask_app.log 2>&1 &
+        FLASK_PID=$!
+        echo "   ✅ Flask restarted (PID: $FLASK_PID)"
+    fi
+done

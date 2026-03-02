@@ -87,8 +87,7 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
     text = ' '.join(text.split())
     
     if not text or len(text.strip()) == 0:
-        print(f"   ❌ Empty text provided, using reference audio as fallback")
-        return reference_audio, 0, 0
+        raise ValueError("Empty text provided for TTS generation")
     
     # Normalize Math/LaTeX if present (matching webapp implementation)
     print(f"   📐 Normalizing Text (Before): {text[:50]}...")
@@ -115,10 +114,8 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
         )
         
         if response.status_code != 200:
-            print(f"   ❌ TTS generation failed: {response.status_code}")
-            print(f"   ⚠️  FALLBACK: Using reference audio instead of generated TTS")
-            print(f"   ⚠️  Reference audio path: {reference_audio}")
-            return reference_audio, 0, 0
+            error_body = response.text[:200] if response.text else "(no body)"
+            raise RuntimeError(f"Chatterbox TTS returned HTTP {response.status_code}: {error_body}")
         
         # Save generated audio with task_id in filename for easy tracking
         if task_id:
@@ -133,10 +130,7 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
         # Verify file size
         file_size = os.path.getsize(output_audio)
         if file_size < 10000:  # Less than 10KB is suspicious
-            print(f"   ⚠️  Audio too small ({file_size} bytes), using reference audio")
-            print(f"   ⚠️  FALLBACK: Using reference audio instead of generated TTS")
-            print(f"   ⚠️  Reference audio path: {reference_audio}")
-            return reference_audio, 0, 0
+            raise RuntimeError(f"Chatterbox TTS returned suspiciously small audio file ({file_size} bytes) — likely a failed generation")
         
         # Get audio duration
         duration = get_audio_duration(output_audio)
@@ -159,16 +153,14 @@ def generate_voice_cloning(text: str, reference_audio: str, tts_port: int, task_
         
     except Exception as e:
         print(f"   ❌ TTS generation error: {e}")
-        print(f"   ⚠️  FALLBACK: Using reference audio due to exception")
         
-        # Still try to unload model in case of error
+        # Try to unload model in case of error before re-raising
         try:
             requests.post(f"{TTS_API}/v1/unload", timeout=10)
         except:
             pass
-            
-        print(f"   ⚠️  Reference audio path: {reference_audio}")
-        return reference_audio, 0, 0
+        
+        raise
 
 
 def get_audio_duration(audio_file: str) -> float:
@@ -387,17 +379,34 @@ def process_task_background(task_id, text, video_path, audio_path=None, language
             )
             print(f"\n🎤 [Task {task_id}] GPU {reserved_gpu_id} reserved, generating voice clone using TTS {tts_port}...")
             
-            cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
-            print(f"   ✓ Voice clone ready: {cloned_audio} ({duration:.2f}s)")
-            
-            # Store TTS timing and audio info in task metadata
-            with scheduler.lock:
-                if task_id in scheduler.active_tasks:
-                    scheduler.active_tasks[task_id]["tts_time"] = tts_time
-                    scheduler.active_tasks[task_id]["input_text"] = text
-                    scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
-                    scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
-                    scheduler.active_tasks[task_id]["audio_duration"] = duration
+            try:
+                cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
+                print(f"   ✓ Voice clone ready: {cloned_audio} ({duration:.2f}s)")
+                
+                # Store TTS timing and audio info in task metadata
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["tts_time"] = tts_time
+                        scheduler.active_tasks[task_id]["input_text"] = text
+                        scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                        scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                        scheduler.active_tasks[task_id]["audio_duration"] = duration
+            except Exception as e:
+                error_msg = f"Chatterbox TTS failed: {str(e)}"
+                print(f"❌ {error_msg}")
+                
+                # Explicit Failure - DO NOT FALLBACK
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["status"] = "failed"
+                        scheduler.active_tasks[task_id]["error"] = error_msg
+                        scheduler.active_tasks[task_id]["completed_time"] = datetime.now()
+                        scheduler.active_tasks[task_id]["progress"] = 0
+                
+                # Release GPU and return
+                scheduler.release_gpu(reserved_gpu_id, task_id)
+                scheduler.clear_preprocessing_status(task_id)
+                return
         
         # Step 4: Clear preprocessing status
         scheduler.clear_preprocessing_status(task_id)
@@ -513,17 +522,33 @@ def process_queued_task_with_tts(task_data, gpu_id):
             tts_port = scheduler.gpu_config[gpu_id]["tts_port"]
             print(f"   Using Chatterbox TTS port {tts_port} for GPU {gpu_id}")
             
-            cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
-            print(f"   ✓ Voice clone generated: {cloned_audio} ({duration:.2f}s)")
-            
-            # Store TTS timing and audio info in task metadata
-            with scheduler.lock:
-                if task_id in scheduler.active_tasks:
-                    scheduler.active_tasks[task_id]["tts_time"] = tts_time
-                    scheduler.active_tasks[task_id]["input_text"] = text
-                    scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
-                    scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
-                    scheduler.active_tasks[task_id]["audio_duration"] = duration
+            try:
+                cloned_audio, duration, tts_time = generate_voice_cloning(text, reference_audio, tts_port, task_id)
+                print(f"   ✓ Voice clone generated: {cloned_audio} ({duration:.2f}s)")
+                
+                # Store TTS timing and audio info in task metadata
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["tts_time"] = tts_time
+                        scheduler.active_tasks[task_id]["input_text"] = text
+                        scheduler.active_tasks[task_id]["reference_audio"] = reference_audio
+                        scheduler.active_tasks[task_id]["generated_audio"] = cloned_audio
+                        scheduler.active_tasks[task_id]["audio_duration"] = duration
+            except Exception as e:
+                error_msg = f"Chatterbox TTS failed: {str(e)}"
+                print(f"❌ {error_msg}")
+                
+                # Explicit Failure - DO NOT FALLBACK
+                with scheduler.lock:
+                    if task_id in scheduler.active_tasks:
+                        scheduler.active_tasks[task_id]["status"] = "failed"
+                        scheduler.active_tasks[task_id]["error"] = error_msg
+                        scheduler.active_tasks[task_id]["completed_time"] = datetime.now()
+                        scheduler.active_tasks[task_id]["progress"] = 0
+                
+                # Release GPU and return
+                scheduler.release_gpu(gpu_id, task_id)
+                return
         
         # Use default video if no video provided
         if not video_path or not os.path.exists(video_path):
