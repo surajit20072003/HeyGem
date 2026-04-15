@@ -257,6 +257,19 @@ def invoke():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+    finally:
+        # Always unload model after request to free VRAM for other workloads
+        if model is not None:
+            print(f"\n🧹 [GPU {gpu_id}] Auto-unloading model to free VRAM...")
+            del model
+            model = None
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            print(f"   ✅ VRAM released")
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check for monitoring"""
@@ -288,10 +301,8 @@ def main():
         device = "cpu"
         print("⚠️  CUDA not available, using CPU")
     
-    # Load model
-    if not load_model(device):
-        print("❌ Failed to start service - model loading failed")
-        sys.exit(1)
+    # Model loaded lazily per request — server starts with 0 VRAM usage
+    print(f"⚡ Lazy load mode: model will load on first /v1/invoke request")
     
     # Start Flask server
     print(f"\n🚀 Starting Chatterbox TTS Service")

@@ -1,0 +1,23 @@
+
+
+# Start service
+sudo systemctl start heygem-dual-tts
+
+# Stop service  
+sudo systemctl stop heygem-dual-tts
+
+# Restart service
+sudo systemctl restart heygem-dual-tts
+
+# Check status
+sudo systemctl status heygem-dual-tts
+
+# View logs
+sudo journalctl -u heygem-dual-tts -f
+
+
+
+systemctl status heygem-dual-tts | grep "Active:"
+
+
+sudo journalctl -u heygem-dual-tts --no-pager | grep "New Task" | tail -n 15

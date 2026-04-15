@@ -1,47 +1,38 @@
 {
-    "avatar_42932a1b": {
-        "id": "avatar_42932a1b",
-        "name": "avtar 1",
-        "created_at": "2026-01-24T13:35:25.691518",
+    "avatar_d8825fc9": {
+        "id": "avatar_d8825fc9",
+        "name": "avatar01",
+        "created_at": "2026-02-05T12:35:49.678406",
         "paths": {
-            "video": "library/avatar_42932a1b/source.mp4",
-            "audio": "library/avatar_42932a1b/audio.wav"
+            "video": "library/avatar_d8825fc9/source.mp4",
+            "audio": "library/avatar_d8825fc9/audio.wav"
         }
     },
-    "avatar_4f44450f": {
-        "id": "avatar_4f44450f",
-        "name": "avtar2",
-        "created_at": "2026-01-24T14:17:57.882081",
+    "avatar_9ff87c46": {
+        "id": "avatar_9ff87c46",
+        "name": "avatar04",
+        "created_at": "2026-02-05T12:39:00.766833",
         "paths": {
-            "video": "library/avatar_4f44450f/source.mp4",
-            "audio": "library/avatar_4f44450f/audio.wav"
+            "video": "library/avatar_9ff87c46/source.mp4",
+            "audio": "library/avatar_9ff87c46/audio.wav"
         }
     },
-    "avatar_65ba8e90": {
-        "id": "avatar_65ba8e90",
-        "name": "avtar 3",
-        "created_at": "2026-01-26T07:04:18.821826",
+    "avatar_46e03dc2": {
+        "id": "avatar_46e03dc2",
+        "name": "avatar05",
+        "created_at": "2026-02-05T12:47:52.740751",
         "paths": {
-            "video": "library/avatar_65ba8e90/source.mp4",
-            "audio": "library/avatar_65ba8e90/audio.wav"
+            "video": "library/avatar_46e03dc2/source.mp4",
+            "audio": "library/avatar_46e03dc2/audio.wav"
         }
     },
-    "avatar_c021cf77": {
-        "id": "avatar_c021cf77",
-        "name": "avtar 4",
-        "created_at": "2026-01-29T10:04:34.475930",
+    "avatar_07c8d0b7": {
+        "id": "avatar_07c8d0b7",
+        "name": "maths_avator",
+        "created_at": "2026-02-09T06:12:01.286287",
         "paths": {
-            "video": "library/avatar_c021cf77/source.mp4",
-            "audio": "library/avatar_c021cf77/audio.wav"
-        }
-    },
-    "avatar_cd64d674": {
-        "id": "avatar_cd64d674",
-        "name": "avtar5",
-        "created_at": "2026-01-29T15:23:38.101415",
-        "paths": {
-            "video": "library/avatar_cd64d674/source.mp4",
-            "audio": "library/avatar_cd64d674/audio.wav"
+            "video": "library/avatar_07c8d0b7/source.mp4",
+            "audio": "library/avatar_07c8d0b7/audio.wav"
         }
     }
 }

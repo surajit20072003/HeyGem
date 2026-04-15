@@ -4,13 +4,34 @@ out
 .idea
 .DS_Store
 
-# Logs
-*.log*
-*.txt
-!requirements.txt
-!r.txt
+# ── Logs & debug text ────────────────────────────────────────────────────────
+*.log
+*.log.*
+app.log
+flask_app.log
+full_sys_log.txt
+full_activity_log.txt
+gpu0_logs.txt
+gpu1_logs.txt
+gpu2_logs.txt
+task_logs.txt
+task_chunked_*_complete_log.txt
+task_*_error_log.txt
+gpu*_task_*_full.txt
+GPU2_TEST_ANALYSIS.txt
 
-# Python
+# Keep these specific .txt / .md files
+!r.txt
+!requirements.txt
+!resources/ffmpeg/linux-amd64/manpages/*.txt
+!resources/ffmpeg/linux-amd64/GPLv3.txt
+
+# ── Server-specific temp docs (not useful for others) ────────────────────────
+CHANGED_FILES_LIST.md
+GIT_PUSH_GUIDE.md
+BACKUP_WORKING_FILES.txt
+
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
@@ -18,12 +39,24 @@ __pycache__/
 .Python
 Heygem_env/
 
-# Sensitive credentials
+# ── Virtual environments ──────────────────────────────────────────────────────
+webapp_chatterbox/chatterbox_venv/
+*_venv/
+.venv/
+venv/
+
+# ── Python version (pyenv local) ─────────────────────────────────────────────
+.python-version
+
+# ── Sensitive credentials / API configs ──────────────────────────────────────
 uploader/client_secrets.json
 uploader/token.json
 uploader/config.json
+webapp_chatterbox/backblaze_config.json
+webapp_chatterbox/vimeo_config.json
+*.service
 
-# Video files
+# ── Video files ──────────────────────────────────────────────────────────────
 *.mp4
 *.avi
 *.mkv
@@ -32,7 +65,7 @@ uploader/config.json
 *.flv
 *.wmv
 
-# Audio files
+# ── Audio files ──────────────────────────────────────────────────────────────
 *.mp3
 *.wav
 *.flac
@@ -41,7 +74,7 @@ uploader/config.json
 *.m4a
 *.wma
 
-# Output directories
+# ── Output / upload / temp runtime directories ───────────────────────────────
 webapp/outputs/
 webapp/temp/
 webapp/uploads/
@@ -51,18 +84,58 @@ webapp_chunked/uploads/
 webapp_multi_video/outputs/
 webapp_multi_video/temp/
 webapp_multi_video/input_videos/
+webapp_chatterbox/outputs/
+webapp_chatterbox/uploads/
+webapp_chatterbox/temp/
 
-# Default videos
-webapp/default.mp4
-webapp_chunked/default.mp4
-webapp_chunked/manual_chunk01.mp4
+# ── Task / queue state files (runtime, not source) ───────────────────────────
+webapp_chatterbox/task_history.json
+webapp_chatterbox/task_history.json.tmp
+webapp_chatterbox/documents_server.txt
+webapp_chatterbox/server.txt
 
-# Service files
-*.service
+# ── Image frames (generated output) ──────────────────────────────────────────
+*.png
+!README.assets/*.png
+!README_zh.assets/*.png
+!doc/**/*.png
+!build/icon.png
+!src/**/*.png
+!resources/**/*.png
+!webapp_chatterbox/static/**/*.png
 
-# IDE
+# ── Large ML model binaries (too big for git — download via install.sh) ──────
+# ✅ DO track: vocab/, config.json, source_vocabulary.txt, target_vocabulary.txt,
+#              dict.SRC.txt, dict.TGT.txt, model.SRC, model.TGT, vocab.SRC, vocab.TGT
+# ❌ DON'T track: model weights (binary, multi-GB)
+models/IndicTrans2/en-indic-exp/en-indic-preprint/ct2_fp16_model/model.bin
+models/IndicTrans2/en-indic-exp/en-indic-preprint/ct2_int8_model/model.bin
+models/IndicTrans2/en-indic-exp/en-indic-preprint/fairseq_model/model/checkpoint_best.pt
+models/IndicTrans2/en-indic-exp/en-indic-spm.zip
+models/IndicTrans2/en-indic-exp/en-indic-fairseq-dict.zip
+
+# Catch-all for any future model weight files
+models/**/*.ckpt
+models/**/*.safetensors
+
+# Python cache inside models/
+models/**/__pycache__/
+models/**/*.pyc
+
+# ── Test / debug artifacts (temp scripts & outputs) ──────────────────────────
+test_*.py
+test_*.sh
+test_*.wav
+debug_normalization.py
+quick_test.py
+monitor_current_task.py
+monitor_with_percentage.py
+
+# Keep test scripts that are part of the app
+!webapp_chatterbox/test_system.py
+!webapp_chatterbox/test_transparent_v2.py
+!webapp_chatterbox/test_transparent_video.py
+!webapp_chatterbox/test_atomic_reservation.py
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
-
-# Chatterbox specific
-webapp_chatterbox/chatterbox_venv/
-resources/ffmpeg/

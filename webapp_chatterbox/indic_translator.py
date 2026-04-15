@@ -57,9 +57,30 @@ class IndicTranslator:
                 print(f"❌ Failed to load IndicTrans2: {e}")
                 raise
     
+    def _split_into_chunks(self, text, max_sentences=5):
+        """
+        Split long text into chunks of max_sentences sentences.
+        IndicTrans2 fails silently (returns English) when text is too long.
+        """
+        import re
+        # Split on sentence boundaries: period, !, ?, danda (।), double danda (॥)
+        sentences = re.split(r'(?<=[.!?।॥])\s+', text.strip())
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        if len(sentences) <= max_sentences:
+            return [text]
+        
+        chunks = []
+        for i in range(0, len(sentences), max_sentences):
+            chunk = " ".join(sentences[i:i + max_sentences])
+            chunks.append(chunk)
+        return chunks
+
     def translate(self, text, src_lang="eng_Latn", tgt_lang="kan_Knda"):
         """
-        Translate text from source to target language
+        Translate text from source to target language.
+        Automatically chunks long text to avoid IndicTrans2 silent failures
+        (model returns English as-is when input exceeds token limit).
         
         Args:
             text: Text to translate (string or list)
@@ -67,18 +88,32 @@ class IndicTranslator:
             tgt_lang: Target language code (default: kan_Knda)
         
         Returns:
-            Translated text (string or list)
+            Translated text (string)
         """
         self.load_model()
         
-        # Handle single string or list
-        sentences = [text] if isinstance(text, str) else text
+        # Handle list input: translate each item and join
+        if isinstance(text, list):
+            all_translations = self.model.batch_translate(text, src_lang, tgt_lang)
+            return " ".join(all_translations)
         
-        # Translate
-        translations = self.model.batch_translate(sentences, src_lang, tgt_lang)
+        # For string input: chunk long text to prevent silent English fallback
+        chunks = self._split_into_chunks(text, max_sentences=5)
         
-        # Return joined string always
-        return " ".join(translations)
+        if len(chunks) == 1:
+            # Short text: translate directly
+            translations = self.model.batch_translate([text], src_lang, tgt_lang)
+            return " ".join(translations)
+        
+        # Long text: translate chunk by chunk
+        print(f"   📦 IndicTrans2: Splitting into {len(chunks)} chunks to avoid token limit issues")
+        translated_chunks = []
+        for i, chunk in enumerate(chunks):
+            print(f"      Chunk {i+1}/{len(chunks)} ({len(chunk)} chars)...")
+            result = self.model.batch_translate([chunk], src_lang, tgt_lang)
+            translated_chunks.append(" ".join(result))
+        
+        return " ".join(translated_chunks)
     
     def english_to_kannada(self, text):
         """Convenience method: English → Kannada"""

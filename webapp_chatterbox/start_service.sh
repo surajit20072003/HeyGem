@@ -63,7 +63,7 @@ echo "   🎤 Started TTS GPU 2 (PID: $CHATTERBOX_2_PID, Port: 20184)"
 # Step 4: Wait for TTS services with health checks
 echo ""
 echo "4️⃣ Waiting for TTS services to be ready..."
-max_retries=60
+max_retries=300
 for i in $(seq 1 $max_retries); do
     if curl -sf http://localhost:20182/health > /dev/null 2>&1 && \
        curl -sf http://localhost:20183/health > /dev/null 2>&1 && \

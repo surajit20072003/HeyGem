@@ -603,6 +603,11 @@ def generate_video():
     Output: task_id immediately
     """
     try:
+        # 🔍 LOG EXACT PAYLOAD for debugging
+        print(f"\n📨 RAW REQUEST PAYLOAD:")
+        print(f"   Form fields: {dict(request.form)}")
+        print(f"   Files: {list(request.files.keys())}")
+
         # Check if text provided
         if 'text' not in request.form:
             return jsonify({"error": "No text provided"}), 400
@@ -718,6 +723,65 @@ def download_audio(task_id):
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
     return jsonify({"error": "Audio file not found"}), 404
+
+
+@app.route('/api/generate-audio', methods=['POST'])
+def generate_audio_only():
+    """
+    Audio-Only TTS endpoint — generates voice without face/video rendering.
+    Used by ai-document-presentation-v3 in audio_only mode.
+
+    Form fields:
+        text     (str, required): Narration text (can contain LaTeX)
+        language (str, optional): 'english' (default) or any Sarvam language
+        speaker  (str, optional): Sarvam voice ID (abhilash, vidya, manisha, etc.)
+
+    Returns:
+        WAV audio file as binary response.
+    """
+    import uuid
+
+    text = request.form.get('text', '').strip()
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    language = request.form.get('language', 'english').lower()
+    speaker  = request.form.get('speaker', 'abhilash').lower()
+    task_id  = f"audio_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+
+    print(f"\n🎙️  [Audio-Only] Task {task_id}")
+    print(f"   Language: {language.upper()}  |  Speaker: {speaker}")
+    print(f"   Text: {text[:80]}{'...' if len(text) > 80 else ''}")
+
+    try:
+        if language in SUPPORTED_INDIAN_LANGUAGES:
+            # IndicTrans2 + Sarvam.ai pipeline (no GPU needed)
+            audio_path, duration, translated_text = generate_indian_language_audio(
+                text, language, speaker, task_id
+            )
+            print(f"   ✅ Sarvam audio ready: {audio_path} ({duration:.2f}s)")
+        else:
+            # Chatterbox TTS on GPU 0 (English / fallback)
+            # Pick GPU 0's TTS port; Chatterbox is fast enough for serial calls
+            tts_port = scheduler.gpu_config[0]["tts_port"]
+            audio_path, duration, _ = generate_voice_cloning(
+                text, DEFAULT_REFERENCE_AUDIO, tts_port, task_id
+            )
+            print(f"   ✅ Chatterbox audio ready: {audio_path} ({duration:.2f}s)")
+
+        return send_file(
+            audio_path,
+            mimetype='audio/wav',
+            as_attachment=True,
+            download_name=f"{task_id}.wav"
+        )
+
+    except Exception as e:
+        print(f"   ❌ Audio-Only generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 
 
 @app.route('/api/queue')
